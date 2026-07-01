@@ -447,6 +447,19 @@ app.get('/api/ping', (_req, res) => {
   res.json({ app: 'flux-studio', version: '2.0.0' });
 });
 
+// ─── Version — current app version for update checks and bug reports ────────────
+app.get('/api/version', (_req, res) => {
+  try {
+    const pkg = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf8'));
+    res.json({ version: pkg.version || '2.0.0' });
+  } catch { res.json({ version: '2.0.0' }); }
+});
+
+// ─── Paths — real filesystem locations for first-launch info ─────────────────
+app.get('/api/paths', (_req, res) => {
+  res.json({ outputs: OUTPUTS_DIR, uploads: UPLOADS_DIR, data: DATA_DIR });
+});
+
 // ─── Quit — new-instance takeover (localhost only) ────────────────────────────
 app.post('/api/quit', (req, res) => {
   const addr = req.socket.remoteAddress;

@@ -720,6 +720,7 @@ document.getElementById('btn-connect').addEventListener('click', () => {
   document.getElementById('screen-app').classList.add('active');
   loadCredits();
   seedSessionCostFromHistory();
+  setTimeout(maybeShowWelcome, 700); // show welcome on first connect
 });
 
 document.getElementById('input-apikey').addEventListener('keydown', e => {
@@ -1861,3 +1862,63 @@ document.getElementById('settings-save').addEventListener('click', saveSettings)
 document.getElementById('settings-modal').addEventListener('click', e => {
   if (e.target === document.getElementById('settings-modal')) closeSettings();
 });
+
+
+// ─── Bug Report ───────────────────────────────────────────────────────────────
+document.getElementById('btn-bug-report').addEventListener('click', async () => {
+  let version = '2.0.0';
+  try { const v = await apiGet('/api/version'); version = v.version || version; } catch {}
+  const platform = navigator.platform || navigator.userAgentData?.platform || 'unknown';
+  const body = encodeURIComponent(
+`**App version:** ${version}
+**Platform:** ${platform}
+
+**What happened?**
+<!-- Describe the bug clearly. What did you do, and what went wrong? -->
+
+**Expected behavior**
+<!-- What did you expect to happen? -->
+
+**Steps to reproduce**
+1. 
+2. 
+3. 
+
+**Screenshots / additional context**
+<!-- Attach screenshots or any other context here -->
+`);
+  const url = `https://github.com/Chewboctopus/flux-API-Suite/issues/new?labels=bug&title=Bug%3A+&body=${body}`;
+  window.open(url, '_blank');
+});
+
+
+// ─── First-launch Welcome ─────────────────────────────────────────────────────
+const WELCOME_KEY = 'fluxStudio_welcomed_v1';
+
+async function maybeShowWelcome() {
+  if (localStorage.getItem(WELCOME_KEY)) return; // already seen
+
+  // Fetch real paths from server
+  try {
+    const paths = await apiGet('/api/paths');
+    document.getElementById('wlc-outputs').textContent = paths.outputs || '…';
+    document.getElementById('wlc-uploads').textContent = paths.uploads || '…';
+    document.getElementById('wlc-data').textContent    = paths.data    || '…';
+  } catch {
+    document.getElementById('wlc-outputs').textContent = '~/Documents/FLUX Studio/data/outputs';
+    document.getElementById('wlc-uploads').textContent = '~/Documents/FLUX Studio/data/uploads';
+    document.getElementById('wlc-data').textContent    = '~/Documents/FLUX Studio/data';
+  }
+
+  document.getElementById('welcome-modal').classList.remove('hidden');
+}
+
+document.getElementById('welcome-ok').addEventListener('click', () => {
+  localStorage.setItem(WELCOME_KEY, '1');
+  document.getElementById('welcome-modal').classList.add('hidden');
+});
+
+// Also fire if already on the app screen on page load (existing key saved)
+if (document.getElementById('screen-app')?.classList.contains('active')) {
+  setTimeout(maybeShowWelcome, 900);
+}
