@@ -24,15 +24,24 @@ const DATA_DIR = path.join(
 let mainWindow = null;
 let serverPort = null;
 
-// ── Find a free port ──────────────────────────────────────────────────────────
-function findFreePort() {
-  return new Promise((resolve, reject) => {
+// ── Find preferred port (fixed = stable localStorage origin across launches) ──
+const PREFERRED_PORT = 4242;
+
+function findPreferredPort() {
+  return new Promise((resolve) => {
     const srv = net.createServer();
-    srv.listen(0, '127.0.0.1', () => {
-      const { port } = srv.address();
-      srv.close(() => resolve(port));
+    srv.once('error', () => {
+      // 4242 busy — fall back to any free port
+      const fb = net.createServer();
+      fb.listen(0, '127.0.0.1', () => {
+        const { port } = fb.address();
+        fb.close(() => resolve(port));
+      });
+      fb.on('error', () => resolve(PREFERRED_PORT + 1)); // last resort
     });
-    srv.on('error', reject);
+    srv.listen(PREFERRED_PORT, '127.0.0.1', () => {
+      srv.close(() => resolve(PREFERRED_PORT));
+    });
   });
 }
 
@@ -56,7 +65,7 @@ function waitForServer(port, retries = 40) {
 
 // ── Start the Express server in-process ───────────────────────────────────────
 async function startServer() {
-  serverPort = await findFreePort();
+  serverPort = await findPreferredPort();
 
   // Set env vars BEFORE importing server.js so its top-level code picks them up
   process.env.PORT     = String(serverPort);

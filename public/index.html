@@ -45,7 +45,8 @@
     </nav>
     <div class="topbar-right">
       <div id="credit-badge" class="credit-badge">Balance: <span class="cval" id="credit-val">—</span></div>
-      <div id="session-badge" class="credit-badge session-badge" title="Credits spent this session (1 credit = $0.01)">Session: <span class="cval-spend" id="session-spend">0 cr · $0.00</span></div>
+      <div id="alltime-badge" class="credit-badge alltime-badge" title="Total credits spent with this API key (all history)">All Time: <span class="cval-alltime" id="alltime-spend">0 cr · $0.00</span></div>
+      <div id="session-badge" class="credit-badge session-badge" title="Credits spent today (1 credit = $0.01)">Today: <span class="cval-spend" id="session-spend">0 cr · $0.00</span></div>
       <button class="btn btn-secondary btn-sm" id="btn-shortcuts" title="Keyboard shortcuts (?)">?</button>
       <button class="btn btn-secondary btn-sm" id="btn-changekey">Change Key</button>
     </div>
@@ -584,6 +585,7 @@
           </select>
           <input type="text" id="hist-search" placeholder="Search prompts…" style="width:200px;padding:5px 10px;font-size:12px">
           <button class="btn btn-secondary btn-sm" id="hist-refresh">↺ Refresh</button>
+          <button class="btn btn-secondary btn-sm" id="hist-compare-btn" title="Select two images to compare side-by-side">⚖ Compare</button>
           <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-label)" id="hist-size-wrap">
             <span>Size</span>
             <input type="range" id="hist-size" min="120" max="400" value="220" step="10" style="width:80px">
@@ -656,6 +658,33 @@
       <button class="btn btn-secondary btn-sm" id="lightbox-send-gen">→ Generate</button>
       <button class="btn btn-secondary btn-sm" id="lightbox-send-inpaint">→ Inpaint</button>
       <button class="btn btn-secondary btn-sm" id="lightbox-close">✕ Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ COMPARE MODAL ══════════════════════════════════════════════════════ -->
+<div id="compare-modal" class="lightbox hidden">
+  <div class="compare-inner">
+    <div class="compare-header">
+      <span class="compare-title">A vs B Compare</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span id="compare-hint" style="font-size:12px;color:var(--text-muted)">Click another image in history to swap</span>
+        <button class="btn btn-secondary btn-sm" id="compare-swap">⇄ Swap A↔B</button>
+        <button class="btn btn-secondary btn-sm" id="compare-close">✕ Close</button>
+      </div>
+    </div>
+    <div class="compare-body">
+      <div class="compare-panel">
+        <div class="compare-ab-badge badge-a">A</div>
+        <img id="compare-img-a" src="" alt="">
+        <div class="compare-panel-meta" id="compare-meta-a"></div>
+      </div>
+      <div class="compare-divider"></div>
+      <div class="compare-panel">
+        <div class="compare-ab-badge badge-b">B</div>
+        <img id="compare-img-b" src="" alt="">
+        <div class="compare-panel-meta" id="compare-meta-b"></div>
+      </div>
     </div>
   </div>
 </div>
