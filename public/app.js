@@ -1465,18 +1465,136 @@ document.getElementById('btn-erase').addEventListener('click', async () => {
 // ─── OUTPAINT tab ─────────────────────────────────────────────────────────────
 const outpaintUZ = new UploadZone('outpaint-upload', 'outpaint-file', 'outpaint-img-preview');
 let _outpaintImgNW = 0, _outpaintImgNH = 0;
+let _opArLocked = false;
+let _opLockedRatio = null; // W/H
 
-outpaintUZ.onChange = (objUrl) => {
+const _opWEl = () => document.getElementById('op-width');
+const _opHEl = () => document.getElementById('op-height');
+
+function _opClamp(v) { return Math.max(64, Math.min(4096, Math.round(v / 8) * 8)); }
+
+function _opSetWH(w, h, updatePreview = true) {
+  _opWEl().value = _opClamp(w);
+  _opHEl().value = _opClamp(h);
+  _updateOpArButtons();
+  if (updatePreview) updateOutpaintPreview();
+}
+
+function _opSetRatio(ratio) {
+  // Expand the canvas to exactly this AR while keeping it >= source on both axes.
+  // ratio = W/H (decimal)
+  const srcW = _outpaintImgNW || 1;
+  const srcH = _outpaintImgNH || 1;
+  // Try height-driven first: H = srcH, W = srcH * ratio
+  let newW = Math.ceil(srcH * ratio);
+  let newH = srcH;
+  if (newW < srcW) {
+    // Width would be smaller than source — flip to width-driven
+    newW = srcW;
+    newH = Math.ceil(srcW / ratio);
+  }
+  _opSetWH(newW, newH);
+  if (_opArLocked) _opLockedRatio = ratio;
+}
+
+function _updateOpArButtons() {
+  const w = Number(_opWEl().value) || 1;
+  const h = Number(_opHEl().value) || 1;
+  const currentRatio = w / h;
+  document.querySelectorAll('.op-ar-btn').forEach(btn => {
+    const ar = btn.dataset.ar;
+    let btnRatio;
+    if (ar === 'src') {
+      btnRatio = _outpaintImgNW && _outpaintImgNH ? _outpaintImgNW / _outpaintImgNH : null;
+    } else {
+      const [a, b] = ar.split(':').map(Number);
+      btnRatio = a / b;
+    }
+    const match = btnRatio && Math.abs(currentRatio - btnRatio) < 0.02;
+    btn.classList.toggle('active', match);
+  });
+}
+
+// AR lock button
+const _opArLockBtn = document.getElementById('op-ar-lock');
+_opArLockBtn.addEventListener('click', () => {
+  _opArLocked = !_opArLocked;
+  _opArLockBtn.classList.toggle('locked', _opArLocked);
+  _opArLockBtn.textContent = _opArLocked ? '🔒' : '🔓';
+  if (_opArLocked) {
+    const w = Number(_opWEl().value) || 1;
+    const h = Number(_opHEl().value) || 1;
+    _opLockedRatio = w / h;
+  }
+});
+
+// Width/Height inputs — enforce AR lock
+_opWEl().addEventListener('input', () => {
+  if (_opArLocked && _opLockedRatio) {
+    _opHEl().value = _opClamp(Number(_opWEl().value) / _opLockedRatio);
+  }
+  _updateOpArButtons();
+  updateOutpaintPreview();
+});
+_opHEl().addEventListener('input', () => {
+  if (_opArLocked && _opLockedRatio) {
+    _opWEl().value = _opClamp(Number(_opHEl().value) * _opLockedRatio);
+  }
+  _updateOpArButtons();
+  updateOutpaintPreview();
+});
+
+// AR preset pills
+document.querySelectorAll('.op-ar-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const ar = btn.dataset.ar;
+    if (ar === 'src') {
+      if (_outpaintImgNW && _outpaintImgNH) _opSetRatio(_outpaintImgNW / _outpaintImgNH);
+    } else {
+      const [a, b] = ar.split(':').map(Number);
+      _opSetRatio(a / b);
+    }
+    if (_opArLocked) {
+      // update locked ratio to the new preset
+      const w = Number(_opWEl().value) || 1, h = Number(_opHEl().value) || 1;
+      _opLockedRatio = w / h;
+    }
+  });
+});
+
+// Source-match quick buttons
+document.getElementById('op-match-w').addEventListener('click', () => {
+  if (!_outpaintImgNW) return;
+  const h = Number(_opHEl().value) || _outpaintImgNH;
+  _opSetWH(_outpaintImgNW, h);
+});
+document.getElementById('op-match-h').addEventListener('click', () => {
+  if (!_outpaintImgNH) return;
+  const w = Number(_opWEl().value) || _outpaintImgNW;
+  _opSetWH(w, _outpaintImgNH);
+});
+document.getElementById('op-match-both').addEventListener('click', () => {
+  if (!_outpaintImgNW || !_outpaintImgNH) return;
+  _opSetWH(_outpaintImgNW, _outpaintImgNH);
+});
+
+outpaintUZ.onChange = (objUrl, serverUrl) => {
   const img = new Image();
   img.onload = () => {
     _outpaintImgNW = img.naturalWidth;
     _outpaintImgNH = img.naturalHeight;
-    // Set canvas size defaults
-    document.getElementById('op-width').value  = Math.round(_outpaintImgNW * 1.5);
-    document.getElementById('op-height').value = _outpaintImgNH;
-    updateOutpaintPreview();
+    // Default: expand width by 50%, keep height
+    _opSetWH(Math.round(_outpaintImgNW * 1.5), _outpaintImgNH);
+    // Show source-match quick buttons
+    document.getElementById('op-quick-row').classList.remove('hidden');
+    // Update Src AR button label with actual ratio
+    const srcBtn = document.getElementById('op-ar-src');
+    const r = _outpaintImgNW / _outpaintImgNH;
+    srcBtn.textContent = r >= 1
+      ? `Src ${(_outpaintImgNW / _outpaintImgNH).toFixed(2)}:1`
+      : `Src 1:${(_outpaintImgNH / _outpaintImgNW).toFixed(2)}`;
   };
-  img.src = objUrl;
+  img.src = objUrl || serverUrl;
 };
 
 function updateOutpaintPreview() {
@@ -1513,7 +1631,8 @@ function updateOutpaintPreview() {
   ctx.fillText('source', x + imgW/2, y + imgH/2);
 }
 
-['op-width','op-height','op-offset-x','op-offset-y'].forEach(id => {
+// Offset inputs still trigger preview update
+['op-offset-x','op-offset-y'].forEach(id => {
   document.getElementById(id)?.addEventListener('input', updateOutpaintPreview);
 });
 

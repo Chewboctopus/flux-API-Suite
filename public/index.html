@@ -371,15 +371,36 @@
 
             <div class="section">
               <div class="section-title">Canvas Size</div>
-              <div class="row">
+
+              <!-- Quick source-match buttons (shown once image is loaded) -->
+              <div class="op-quick-row hidden" id="op-quick-row">
+                <button class="btn btn-secondary btn-sm" id="op-match-w" title="Set width equal to source image width">↔ Src W</button>
+                <button class="btn btn-secondary btn-sm" id="op-match-h" title="Set height equal to source image height">↕ Src H</button>
+                <button class="btn btn-secondary btn-sm" id="op-match-both" title="Reset canvas to exact source dimensions">⊞ Both</button>
+              </div>
+
+              <!-- Width / AR Lock / Height -->
+              <div class="row op-wh-row">
                 <div class="field">
                   <div class="field-label">Width</div>
                   <input type="number" id="op-width" value="1536" min="64" max="4096" step="8">
                 </div>
+                <button class="ar-lock-btn" id="op-ar-lock" title="Lock aspect ratio">🔓</button>
                 <div class="field">
                   <div class="field-label">Height</div>
                   <input type="number" id="op-height" value="1024" min="64" max="4096" step="8">
                 </div>
+              </div>
+
+              <!-- AR preset pills -->
+              <div class="op-ar-presets">
+                <button class="op-ar-btn" data-ar="16:9">16∶9</button>
+                <button class="op-ar-btn" data-ar="9:16">9∶16</button>
+                <button class="op-ar-btn" data-ar="1:1">1∶1</button>
+                <button class="op-ar-btn" data-ar="4:3">4∶3</button>
+                <button class="op-ar-btn" data-ar="3:2">3∶2</button>
+                <button class="op-ar-btn" data-ar="21:9">21∶9</button>
+                <button class="op-ar-btn" id="op-ar-src" data-ar="src" title="Match source image aspect ratio">Src AR</button>
               </div>
             </div>
 
