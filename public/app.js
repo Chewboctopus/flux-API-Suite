@@ -115,11 +115,13 @@ class UploadZone {
 
   setFromUrl(serverUrl) {
     this.url = serverUrl;
+    this.objUrl = null; // no blob for server-side images
     if (this.preview) {
       this.preview.src = serverUrl;
       this.preview.style.display = 'block';
       this.zone.classList.add('has-image');
     }
+    this.onChange?.(null, serverUrl); // enable dependent buttons (Paint Mask etc.)
   }
 
   clear() {
@@ -206,31 +208,42 @@ class FullscreenPainter {
   /* ── Coordinate transform: display → natural ── */
   _getPos(e) {
     const r  = this.canvas.getBoundingClientRect();
-    const sx = this.canvas.width  / r.width;
-    const sy = this.canvas.height / r.height;
+    // Display canvas coords (for overlay drawing)
+    const dx = (e.clientX - r.left) * (this.canvas.width  / r.width);
+    const dy = (e.clientY - r.top)  * (this.canvas.height / r.height);
+    const dr = this.brushSize; // brush radius in display canvas pixels
+
+    // Natural (full-res) coords for the offscreen mask canvas
+    const invScale = 1 / (this._displayScale || 1);
     return {
-      x: (e.clientX - r.left) * sx,
-      y: (e.clientY - r.top)  * sy,
-      r: this.brushSize * Math.max(sx, sy),   // brush radius in natural pixels
+      // display canvas coords
+      dx, dy, dr,
+      // offscreen mask coords (natural resolution)
+      x: dx * invScale,
+      y: dy * invScale,
+      r: dr * invScale,
     };
   }
 
   /* ── Core paint stroke ── */
-  _paint({ x, y, r } = this._getPos(arguments[0])) {
-    const pos = this._getPos(arguments[0]);
-    const px = pos.x, py = pos.y, pr = pos.r;
+  _paint(e) {
+    const pos = this._getPos(e);
+    // Display canvas coords (for overlay)
+    const px = pos.dx, py = pos.dy, pr = pos.dr;
+    // Natural resolution coords (for offscreen mask)
+    const ox = pos.x,  oy = pos.y,  or_ = pos.r;
 
     if (this.mode === 'paint') {
-      // Mask: add white
-      const mg = this.offCtx.createRadialGradient(px, py, 0, px, py, pr);
+      // Off-screen mask: add white at natural resolution
+      const mg = this.offCtx.createRadialGradient(ox, oy, 0, ox, oy, or_);
       mg.addColorStop(0,   'rgba(255,255,255,1)');
       mg.addColorStop(0.6, 'rgba(255,255,255,0.9)');
       mg.addColorStop(1,   'rgba(255,255,255,0)');
       this.offCtx.globalCompositeOperation = 'source-over';
       this.offCtx.fillStyle = mg;
-      this.offCtx.beginPath(); this.offCtx.arc(px, py, pr, 0, Math.PI * 2); this.offCtx.fill();
+      this.offCtx.beginPath(); this.offCtx.arc(ox, oy, or_, 0, Math.PI * 2); this.offCtx.fill();
 
-      // Overlay: add red
+      // Display overlay: add red at display resolution
       if (this.showOverlay) {
         const dg = this.ctx.createRadialGradient(px, py, 0, px, py, pr);
         dg.addColorStop(0,   'rgba(255,60,60,0.6)');
@@ -241,17 +254,17 @@ class FullscreenPainter {
         this.ctx.beginPath(); this.ctx.arc(px, py, pr, 0, Math.PI * 2); this.ctx.fill();
       }
     } else {
-      // Mask: remove (destination-out)
-      const mg = this.offCtx.createRadialGradient(px, py, 0, px, py, pr);
+      // Off-screen mask: erase (destination-out)
+      const mg = this.offCtx.createRadialGradient(ox, oy, 0, ox, oy, or_);
       mg.addColorStop(0,   'rgba(0,0,0,1)');
       mg.addColorStop(0.6, 'rgba(0,0,0,0.85)');
       mg.addColorStop(1,   'rgba(0,0,0,0)');
       this.offCtx.globalCompositeOperation = 'destination-out';
       this.offCtx.fillStyle = mg;
-      this.offCtx.beginPath(); this.offCtx.arc(px, py, pr, 0, Math.PI * 2); this.offCtx.fill();
+      this.offCtx.beginPath(); this.offCtx.arc(ox, oy, or_, 0, Math.PI * 2); this.offCtx.fill();
       this.offCtx.globalCompositeOperation = 'source-over';
 
-      // Overlay: punch out
+      // Display overlay: punch out
       if (this.showOverlay) {
         const dg = this.ctx.createRadialGradient(px, py, 0, px, py, pr);
         dg.addColorStop(0,   'rgba(0,0,0,1)');
@@ -322,20 +335,36 @@ class FullscreenPainter {
   _initCanvas() {
     const nw = this.sourceImg.naturalWidth;
     const nh = this.sourceImg.naturalHeight;
+    if (!nw || !nh) return; // image not yet decoded
 
     document.getElementById('pm-dims-label').textContent = `${nw} × ${nh}`;
 
-    // Set both canvases to natural resolution
-    this.canvas.width  = nw;  this.canvas.height  = nh;
-    this.offCanvas.width = nw; this.offCanvas.height = nh;
+    // Off-screen mask canvas stays at FULL natural resolution for export quality
+    this.offCanvas.width  = nw;
+    this.offCanvas.height = nh;
     this.offCtx.clearRect(0, 0, nw, nh);
-    this.ctx.clearRect(0, 0, nw, nh);
+
+    // Display canvas: cap at 2048px on the long edge to avoid GPU pressure on large images.
+    // Brush coordinates are scaled back to natural resolution when painting offCanvas.
+    const MAX_DISPLAY = 2048;
+    const scale = Math.min(1, MAX_DISPLAY / Math.max(nw, nh));
+    const dw = Math.round(nw * scale);
+    const dh = Math.round(nh * scale);
+    this.canvas.width  = dw;
+    this.canvas.height = dh;
+    this._displayScale = scale; // store for coordinate transform
+    this.ctx.clearRect(0, 0, dw, dh);
 
     // Restore previous mask for this tab if any
     const existing = this._masks[this._tab];
     if (existing) {
       const m = new Image();
-      m.onload = () => { this.offCtx.drawImage(m, 0, 0); this._redrawOverlay(); };
+      m.onload = () => {
+        this.offCtx.drawImage(m, 0, 0);
+        // Scale down to display canvas for overlay
+        this.ctx.drawImage(this.offCanvas, 0, 0, dw, dh);
+        this._redrawOverlay();
+      };
       m.src = 'data:image/png;base64,' + existing;
     }
   }
