@@ -443,6 +443,16 @@ painter._callback = (b64, tab) => {
 };
 
 
+// ─── HTML escaping helper (prevents innerHTML corruption from user prompts) ────
+function escHtml(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 // ─── Result card builder ──────────────────────────────────────────────────────
 function buildResultCard(entry, onSendInpaint, onSendGenerate) {
   const card = document.createElement('div');
@@ -454,13 +464,13 @@ function buildResultCard(entry, onSendInpaint, onSendGenerate) {
 
   card.innerHTML = `
     <div class="rc-img-wrap" style="position:relative;">
-      <img src="${entry.image_url}" alt="${entry.prompt || ''}" loading="lazy">
+      <img src="${escHtml(entry.image_url)}" alt="${escHtml(entry.prompt)}" loading="lazy">
       <span class="rc-ab-label" style="display:none;"></span>
     </div>
     <div class="result-card-body">
       <div class="result-meta">${[shortId, cost, seed].filter(Boolean).join(' · ')}</div>
       <div class="result-actions">
-        <a class="btn btn-secondary" href="${entry.image_url}" download target="_blank">↓</a>
+        <a class="btn btn-secondary" href="${escHtml(entry.image_url)}" download target="_blank">↓</a>
         <button class="btn btn-secondary" data-action="copy" title="Copy to clipboard">📋</button>
         ${hasRef ? '<button class="btn btn-secondary" data-action="ab" title="Toggle A/B compare with reference">A⇄B</button>' : ''}
         <div class="rc-sendto-wrap">
@@ -1899,6 +1909,8 @@ function renderHistory() {
   empty.classList.add('hidden');
 
   items.forEach(entry => {
+    if (!entry.image_url) return; // skip malformed entries
+
     // A/B compare source: use the entry's stored input_url or first ref_url
     const refPreview = entry.input_url || entry.ref_urls?.[0] || null;
 
@@ -1909,17 +1921,17 @@ function renderHistory() {
 
     card.innerHTML = `
       <div style="position:relative;overflow:hidden">
-        <img src="${entry.image_url}" alt="${entry.prompt || ''}" loading="lazy" style="width:100%;display:block">
+        <img src="${escHtml(entry.image_url)}" alt="${escHtml(entry.prompt)}" loading="lazy" style="width:100%;display:block">
         <span class="hc-ab-label" style="display:none;position:absolute;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.72);color:#fff;font-size:10px;font-weight:700;padding:2px 9px;border-radius:10px;pointer-events:none;white-space:nowrap"></span>
       </div>
       <div class="history-card-body">
-        <div class="history-card-prompt">${entry.prompt || '(no prompt)'}</div>
+        <div class="history-card-prompt">${escHtml(entry.prompt) || '(no prompt)'}</div>
         <div class="history-meta-row">
-          <span class="tool-badge ${entry.tool}">${entry.tool}</span>
+          <span class="tool-badge ${escHtml(entry.tool)}">${escHtml(entry.tool)}</span>
           <span class="history-ts">${ts} ${cost}</span>
         </div>
         <div class="history-actions">
-          <a class="btn btn-secondary btn-sm" href="${entry.image_url}" download>↓</a>
+          <a class="btn btn-secondary btn-sm" href="${escHtml(entry.image_url)}" download>↓</a>
           <button class="btn btn-secondary btn-sm" data-action="copy" title="Copy to clipboard">📋</button>
           ${refPreview ? '<button class="btn btn-secondary btn-sm hc-ab-btn">A⇄B</button>' : ''}
           <div class="rc-sendto-wrap">
@@ -1941,14 +1953,14 @@ function renderHistory() {
     let abState   = 'generated';
     const hcMenu  = card.querySelector('.hc-sendto-menu');
 
-    card.querySelector('[data-action=copy]').addEventListener('click', () => copyImageToClipboard(entry.image_url));
 
-    card.querySelector('[data-action=hc-sendto]').addEventListener('click', (e) => {
+    card.querySelector('[data-action="copy"]')?.addEventListener('click', () => copyImageToClipboard(entry.image_url));
+    card.querySelector('[data-action="hc-sendto"]')?.addEventListener('click', (e) => {
       e.stopPropagation();
       document.querySelectorAll('.hc-sendto-menu').forEach(m => { if (m !== hcMenu) m.classList.add('hidden'); });
-      hcMenu.classList.toggle('hidden');
+      hcMenu?.classList.toggle('hidden');
     });
-    hcMenu.addEventListener('click', (e) => {
+    hcMenu?.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-sendto]');
       if (!btn) return;
       hcMenu.classList.add('hidden');
@@ -1979,18 +1991,10 @@ function renderHistory() {
       if (_abB && _abB.id === entry.id) card.classList.add('hist-compare-b');
     }
 
-    cardImg.addEventListener('click', () => {
+    cardImg?.addEventListener('click', () => {
       if (_compareMode) { selectForCompare(entry); return; }
       if (refPreview) entry._refPreviewUrl = refPreview;
       openLightbox(entry);
-    });
-    card.querySelector('[data-action=inpaint]').addEventListener('click', () => {
-      switchTab('inpaint');
-      setTimeout(() => inpaintUZ.setFromUrl(entry.image_url), 100);
-    });
-    card.querySelector('[data-action=generate]').addEventListener('click', () => {
-      switchTab('generate');
-      if (entry.prompt) document.getElementById('gen-prompt').value = entry.prompt;
     });
     grid.appendChild(card);
   });
