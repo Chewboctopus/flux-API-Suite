@@ -26,10 +26,7 @@
     "productName": "FLUX Studio",
     "copyright":   "Black Forest Labs",
     "icon":        "build/icon.png",
-    "publish": {
-      "provider": "github",
-      "releaseType": "release"
-    },
+    "asar":        false,
     "directories": {
       "output":    "dist",
       "buildResources": "build"
