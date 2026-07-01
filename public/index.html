@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FLUX Studio — BFL API Suite</title>
+  <meta name="description" content="Full-featured local suite for the Black Forest Labs FLUX API — Generate, Inpaint, Erase, Outpaint, VTO, Deblur">
+  <link rel="stylesheet" href="index.css">
+</head>
+<body>
+
+<!-- ═══ API KEY SCREEN ═══════════════════════════════════════════════════════ -->
+<div id="screen-apikey" class="screen active">
+  <div class="apikey-card">
+    <div class="apikey-logo">
+      <svg width="32" height="32" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="8" fill="currentColor" fill-opacity="0.12"/><path d="M8 16C8 11.6 11.6 8 16 8s8 3.6 8 8-3.6 8-8 8-8-3.6-8-8Z" stroke="currentColor" stroke-width="1.5"/><circle cx="16" cy="16" r="3" fill="currentColor"/></svg>
+      <div class="apikey-logo-text">FLUX <span>Studio</span></div>
+    </div>
+    <p class="apikey-tagline">Full access to every Black Forest Labs model — Generate, Inpaint, Erase, Outpaint, Virtual Try-On, and Deblur. Runs locally, hits the API directly.</p>
+    <div class="apikey-form">
+      <label for="input-apikey">BFL API Key</label>
+      <input type="password" id="input-apikey" placeholder="bfl-xxxxxxxxxxxxxxxxxxxx" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="apikey-actions">
+      <button class="btn btn-primary btn-full" id="btn-connect">Connect →</button>
+    </div>
+    <p class="apikey-note">Key stored in browser only. Never sent to any server except <a href="https://api.bfl.ai" target="_blank">api.bfl.ai</a>.</p>
+  </div>
+</div>
+
+<!-- ═══ MAIN APP ══════════════════════════════════════════════════════════════ -->
+<div id="screen-app" class="screen">
+
+  <!-- Topbar -->
+  <header class="topbar">
+    <div class="topbar-brand">FLUX <span>Studio</span></div>
+    <nav class="tab-nav">
+      <button class="tab-btn active" data-tab="generate">Generate</button>
+      <button class="tab-btn" data-tab="inpaint">Inpaint</button>
+      <button class="tab-btn" data-tab="erase">Erase</button>
+      <button class="tab-btn" data-tab="outpaint">Outpaint</button>
+      <button class="tab-btn" data-tab="vto">Try-On</button>
+      <button class="tab-btn" data-tab="deblur">Deblur</button>
+      <button class="tab-btn" data-tab="history">History</button>
+    </nav>
+    <div class="topbar-right">
+      <div id="credit-badge" class="credit-badge">Balance: <span class="cval" id="credit-val">—</span></div>
+      <div id="session-badge" class="credit-badge session-badge" title="Credits spent this session (1 credit = $0.01)">Session: <span class="cval-spend" id="session-spend">0 cr · $0.00</span></div>
+      <button class="btn btn-secondary btn-sm" id="btn-shortcuts" title="Keyboard shortcuts (?)">?</button>
+      <button class="btn btn-secondary btn-sm" id="btn-changekey">Change Key</button>
+    </div>
+  </header>
+
+  <!-- Main -->
+  <main class="app-main">
+
+    <!-- ─── GENERATE ─────────────────────────────────────────────────────── -->
+    <div id="tab-generate" class="tab-panel active">
+      <div class="tool-layout">
+        <aside class="tool-sidebar">
+          <div class="tool-sidebar-inner">
+
+            <div class="section">
+              <div class="section-title">Model</div>
+              <div class="field">
+                <select id="gen-model">
+                  <optgroup label="── FLUX.2 (Recommended) ──">
+                    <option value="flux-2-pro" selected>FLUX.2 [pro] — Recommended default</option>
+                    <option value="flux-2-pro-preview">FLUX.2 [pro] Preview</option>
+                    <option value="flux-2-max">FLUX.2 [max] — Highest quality</option>
+                    <option value="flux-2-flex">FLUX.2 [flex] — Typography & text</option>
+                    <option value="flux-2-klein-9b">FLUX.2 [klein] 9B — Fast open weights</option>
+                    <option value="flux-2-klein-9b-preview">FLUX.2 [klein] 9B Preview</option>
+                    <option value="flux-2-klein-4b">FLUX.2 [klein] 4B — Fastest</option>
+                  </optgroup>
+                  <optgroup label="── FLUX.1 Legacy ──">
+                    <option value="flux-pro-1.1">FLUX1.1 [pro]</option>
+                    <option value="flux-pro-1.1-ultra">FLUX1.1 [pro] Ultra</option>
+                    <option value="flux-kontext-pro">FLUX.1 Kontext [pro]</option>
+                    <option value="flux-kontext-max">FLUX.1 Kontext [max]</option>
+                    <option value="flux-dev">FLUX.1 [dev]</option>
+                  </optgroup>
+                </select>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Prompt</div>
+              <div class="field">
+                <textarea id="gen-prompt" rows="5" placeholder="Describe what you want to generate…"></textarea>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Reference Images <span class="field-hint">(up to 8)</span></div>
+              <div class="refs-grid" id="gen-refs-grid">
+                <!-- Slots injected by JS -->
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Size</div>
+              <div class="row">
+                <div class="field">
+                  <div class="field-label">Width</div>
+                  <input type="number" id="gen-width" value="1024" min="64" max="4096" step="8">
+                </div>
+                <div class="field">
+                  <div class="field-label">Height</div>
+                  <input type="number" id="gen-height" value="1024" min="64" max="4096" step="8">
+                </div>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px" id="gen-presets">
+                <button class="btn btn-secondary btn-sm" data-w="1024" data-h="1024">1:1</button>
+                <button class="btn btn-secondary btn-sm" data-w="1344" data-h="768">16:9</button>
+                <button class="btn btn-secondary btn-sm" data-w="768" data-h="1344">9:16</button>
+                <button class="btn btn-secondary btn-sm" data-w="1216" data-h="832">3:2</button>
+                <button class="btn btn-secondary btn-sm" data-w="832" data-h="1216">2:3</button>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Parameters</div>
+              <div class="field">
+                <div class="field-label">Seed <span class="field-hint">blank = random</span></div>
+                <div class="seed-row">
+                  <input type="number" id="gen-seed" placeholder="random">
+                  <button class="btn-icon" id="gen-seed-rand" title="Randomize">🎲</button>
+                </div>
+              </div>
+
+              <div class="field">
+                <div class="field-label">Output Format</div>
+                <select id="gen-format">
+                  <option value="png">PNG</option>
+                  <option value="jpeg">JPEG</option>
+                  <option value="webp">WebP</option>
+                </select>
+              </div>
+              <div class="toggle-row">
+                <span class="toggle-label">Prompt Upsampling</span>
+                <label class="toggle"><input type="checkbox" id="gen-upsampling"><span class="toggle-slider"></span></label>
+              </div>
+            </div>
+
+            <div class="section">
+              <a class="advanced-toggle" id="gen-adv-toggle">⚙ Advanced</a>
+              <div class="advanced-body" id="gen-adv-body">
+                <div class="field">
+                  <div class="field-label">Webhook URL</div>
+                  <input type="url" id="gen-webhook" placeholder="https://your-server.com/hook">
+                </div>
+                <div class="field">
+                  <div class="field-label">Webhook Secret</div>
+                  <input type="text" id="gen-webhook-secret" placeholder="optional secret">
+                </div>
+              </div>
+            </div>
+
+          </div>
+          <div class="tool-sidebar-footer">
+            <div style="display:flex;gap:8px;align-items:center">
+              <button class="btn btn-primary" id="btn-generate" style="flex:1">&#10022; Generate</button>
+              <select id="gen-batch" title="Batch count" style="width:58px;flex-shrink:0">
+                <option value="1">×1</option>
+                <option value="2">×2</option>
+                <option value="4">×4</option>
+                <option value="8">×8</option>
+              </select>
+            </div>
+          </div>
+        </aside>
+
+        <div class="tool-main">
+          <div class="status-bar hidden" id="gen-status">
+            <div class="status-spinner"></div>
+            <span class="status-text" id="gen-status-text">Generating…</span>
+            <span class="status-elapsed" id="gen-elapsed">0s</span>
+          </div>
+          <div class="results-area" id="gen-results">
+            <div class="results-placeholder">
+              <div class="ph-icon">✦</div>
+              <p>Results will appear here</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── INPAINT ──────────────────────────────────────────────────────── -->
+    <div id="tab-inpaint" class="tab-panel">
+      <div class="tool-layout">
+        <aside class="tool-sidebar">
+          <div class="tool-sidebar-inner">
+
+            <div class="section">
+              <div class="section-title">Source Image</div>
+              <div class="upload-zone" id="inpaint-upload">
+                <input type="file" id="inpaint-file" accept="image/*">
+                <div class="uz-icon">🖼</div>
+                <div class="uz-text">Drop image or click to browse</div>
+                <div class="uz-hint">PNG, JPG, WebP · max 25MB</div>
+                <img id="inpaint-img-preview" style="display:none">
+                <div class="uz-overlay"><span>Change Image</span></div>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Mask</div>
+              <div class="mask-sidebar-preview" id="inpaint-mask-sidebar">
+                <div class="mask-sidebar-empty" id="inpaint-mask-empty-hint">Upload an image above, then open the painter.</div>
+                <canvas class="mask-sidebar-thumb hidden" id="inpaint-mask-thumb"></canvas>
+              </div>
+              <button class="btn btn-secondary btn-full" id="inpaint-open-painter" disabled>
+                🖌 Open Full-Size Mask Painter
+              </button>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Parameters</div>
+              <div class="field">
+                <div class="field-label">Prompt <span class="field-hint">what to paint in</span></div>
+                <textarea id="inpaint-prompt" rows="3" placeholder="Describe what should appear in the masked area…"></textarea>
+              </div>
+              <div class="field">
+                <div class="field-label">Steps <span id="inpaint-steps-val" class="field-hint">50</span></div>
+                <input type="range" id="inpaint-steps" min="15" max="50" value="50">
+              </div>
+              <div class="field">
+                <div class="field-label">Guidance <span id="inpaint-guidance-val" class="field-hint">60</span></div>
+                <input type="range" id="inpaint-guidance" min="1.5" max="100" value="60" step="0.5">
+              </div>
+              <div class="field">
+                <div class="field-label">Seed</div>
+                <div class="seed-row">
+                  <input type="number" id="inpaint-seed" placeholder="random">
+                  <button class="btn-icon" id="inpaint-seed-rand">🎲</button>
+                </div>
+              </div>
+
+              <div class="field">
+                <div class="field-label">Output Format</div>
+                <select id="inpaint-format">
+                  <option value="png">PNG</option>
+                  <option value="jpeg">JPEG</option>
+                  <option value="webp">WebP</option>
+                </select>
+              </div>
+              <div class="toggle-row">
+                <span class="toggle-label">Prompt Upsampling</span>
+                <label class="toggle"><input type="checkbox" id="inpaint-upsampling"><span class="toggle-slider"></span></label>
+              </div>
+            </div>
+
+          </div>
+          <div class="tool-sidebar-footer">
+            <button class="btn btn-primary btn-full" id="btn-inpaint">✦ Inpaint</button>
+          </div>
+        </aside>
+
+        <div class="tool-main">
+          <div class="status-bar hidden" id="inpaint-status">
+            <div class="status-spinner"></div>
+            <span class="status-text" id="inpaint-status-text">Inpainting…</span>
+            <span class="status-elapsed" id="inpaint-elapsed">0s</span>
+          </div>
+          <div class="results-area" id="inpaint-results">
+            <div class="results-placeholder"><div class="ph-icon">🎨</div><p>Inpaint results will appear here</p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── ERASE ─────────────────────────────────────────────────────────── -->
+    <div id="tab-erase" class="tab-panel">
+      <div class="tool-layout">
+        <aside class="tool-sidebar">
+          <div class="tool-sidebar-inner">
+
+            <div class="section">
+              <div class="section-title">Source Image</div>
+              <div class="upload-zone" id="erase-upload">
+                <input type="file" id="erase-file" accept="image/*">
+                <div class="uz-icon">🖼</div>
+                <div class="uz-text">Drop image or click to browse</div>
+                <div class="uz-hint">The object you paint will be removed</div>
+                <img id="erase-img-preview" style="display:none">
+                <div class="uz-overlay"><span>Change Image</span></div>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Mask — Paint What to Remove</div>
+              <div class="mask-sidebar-preview" id="erase-mask-sidebar">
+                <div class="mask-sidebar-empty" id="erase-mask-empty-hint">Upload an image above, then open the painter.</div>
+                <canvas class="mask-sidebar-thumb hidden" id="erase-mask-thumb"></canvas>
+              </div>
+              <button class="btn btn-secondary btn-full" id="erase-open-painter" disabled>
+                🖌 Open Full-Size Mask Painter
+              </button>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Parameters</div>
+              <div class="field">
+                <div class="field-label">Dilate Pixels <span id="erase-dilate-val" class="field-hint">10</span></div>
+                <input type="range" id="erase-dilate" min="0" max="25" value="10">
+              </div>
+              <div class="field">
+                <div class="field-label">Seed</div>
+                <div class="seed-row">
+                  <input type="number" id="erase-seed" placeholder="random">
+                  <button class="btn-icon" id="erase-seed-rand">🎲</button>
+                </div>
+              </div>
+
+              <div class="field">
+                <div class="field-label">Output Format</div>
+                <select id="erase-format">
+                  <option value="png">PNG</option>
+                  <option value="jpeg">JPEG</option>
+                  <option value="webp">WebP</option>
+                </select>
+              </div>
+            </div>
+
+          </div>
+          <div class="tool-sidebar-footer">
+            <button class="btn btn-primary btn-full" id="btn-erase">✦ Erase Object</button>
+          </div>
+        </aside>
+
+        <div class="tool-main">
+          <div class="status-bar hidden" id="erase-status">
+            <div class="status-spinner"></div>
+            <span class="status-text">Erasing object…</span>
+            <span class="status-elapsed" id="erase-elapsed">0s</span>
+          </div>
+          <div class="results-area" id="erase-results">
+            <div class="results-placeholder"><div class="ph-icon">🧹</div><p>Erase results will appear here</p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── OUTPAINT ──────────────────────────────────────────────────────── -->
+    <div id="tab-outpaint" class="tab-panel">
+      <div class="tool-layout">
+        <aside class="tool-sidebar">
+          <div class="tool-sidebar-inner">
+
+            <div class="section">
+              <div class="section-title">Source Image</div>
+              <div class="upload-zone" id="outpaint-upload">
+                <input type="file" id="outpaint-file" accept="image/*">
+                <div class="uz-icon">🖼</div>
+                <div class="uz-text">Drop image or click to browse</div>
+                <img id="outpaint-img-preview" style="display:none">
+                <div class="uz-overlay"><span>Change Image</span></div>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Canvas Size</div>
+              <div class="row">
+                <div class="field">
+                  <div class="field-label">Width</div>
+                  <input type="number" id="op-width" value="1536" min="64" max="4096" step="8">
+                </div>
+                <div class="field">
+                  <div class="field-label">Height</div>
+                  <input type="number" id="op-height" value="1024" min="64" max="4096" step="8">
+                </div>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Source Placement</div>
+              <div class="offset-grid">
+                <div class="field">
+                  <div class="field-label">Offset X <span class="field-hint">px, null=center</span></div>
+                  <input type="number" id="op-offset-x" placeholder="center">
+                </div>
+                <div class="field">
+                  <div class="field-label">Offset Y <span class="field-hint">px, null=center</span></div>
+                  <input type="number" id="op-offset-y" placeholder="center">
+                </div>
+              </div>
+              <button class="btn btn-secondary btn-sm" id="op-center-btn">⊕ Center source image</button>
+              <div style="background:var(--bg-input);border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden;margin-top:6px">
+                <canvas id="op-preview-canvas" style="width:100%;display:block"></canvas>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Options</div>
+              <div class="field">
+                <div class="field-label">Quality Mode</div>
+                <select id="op-mode">
+                  <option value="high">High — Best fidelity (slower)</option>
+                  <option value="fast">Fast — Good for backgrounds</option>
+                </select>
+              </div>
+              <div class="field">
+                <div class="field-label">Prompt <span class="field-hint">optional guidance</span></div>
+                <textarea id="op-prompt" rows="2" placeholder="Optional: describe what to fill in…"></textarea>
+              </div>
+              <div class="toggle-row">
+                <span class="toggle-label">Auto Crop</span>
+                <label class="toggle"><input type="checkbox" id="op-autocrop"><span class="toggle-slider"></span></label>
+              </div>
+
+              <div class="field">
+                <div class="field-label">Output Format</div>
+                <select id="op-format">
+                  <option value="png">PNG</option>
+                  <option value="jpeg">JPEG</option>
+                  <option value="webp">WebP</option>
+                </select>
+              </div>
+            </div>
+
+          </div>
+          <div class="tool-sidebar-footer">
+            <button class="btn btn-primary btn-full" id="btn-outpaint">✦ Outpaint</button>
+          </div>
+        </aside>
+
+        <div class="tool-main">
+          <div class="status-bar hidden" id="outpaint-status">
+            <div class="status-spinner"></div>
+            <span class="status-text">Outpainting…</span>
+            <span class="status-elapsed" id="outpaint-elapsed">0s</span>
+          </div>
+          <div class="results-area" id="outpaint-results">
+            <div class="results-placeholder"><div class="ph-icon">⬚</div><p>Outpaint results will appear here</p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── VTO ───────────────────────────────────────────────────────────── -->
+    <div id="tab-vto" class="tab-panel">
+      <div class="tool-layout">
+        <aside class="tool-sidebar">
+          <div class="tool-sidebar-inner">
+
+            <div class="section">
+              <div class="section-title">Person Image</div>
+              <div class="upload-zone" id="vto-person-upload" style="height:160px">
+                <input type="file" id="vto-person-file" accept="image/*">
+                <div class="uz-icon">🧍</div>
+                <div class="uz-text">Person photo</div>
+                <img id="vto-person-preview" style="display:none">
+                <div class="uz-overlay"><span>Change</span></div>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Garment Image</div>
+              <div class="upload-zone" id="vto-garment-upload" style="height:160px">
+                <input type="file" id="vto-garment-file" accept="image/*">
+                <div class="uz-icon">👕</div>
+                <div class="uz-text">Garment photo</div>
+                <img id="vto-garment-preview" style="display:none">
+                <div class="uz-overlay"><span>Change</span></div>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Parameters</div>
+              <div class="field">
+                <div class="field-label">Prompt</div>
+                <textarea id="vto-prompt" rows="3">TRY-ON: The person of image 1 wearing the garments of image 2.</textarea>
+              </div>
+              <div class="field">
+                <div class="field-label">Seed</div>
+                <div class="seed-row">
+                  <input type="number" id="vto-seed" placeholder="random">
+                  <button class="btn-icon" id="vto-seed-rand">🎲</button>
+                </div>
+              </div>
+
+              <div class="field">
+                <div class="field-label">Output Format</div>
+                <select id="vto-format">
+                  <option value="png">PNG</option>
+                  <option value="jpeg">JPEG</option>
+                  <option value="webp">WebP</option>
+                </select>
+              </div>
+            </div>
+
+          </div>
+          <div class="tool-sidebar-footer">
+            <button class="btn btn-primary btn-full" id="btn-vto">✦ Virtual Try-On</button>
+          </div>
+        </aside>
+
+        <div class="tool-main">
+          <div class="status-bar hidden" id="vto-status">
+            <div class="status-spinner"></div>
+            <span class="status-text">Processing try-on…</span>
+            <span class="status-elapsed" id="vto-elapsed">0s</span>
+          </div>
+          <div class="results-area" id="vto-results">
+            <div class="results-placeholder"><div class="ph-icon">👗</div><p>Try-on results will appear here</p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── DEBLUR ────────────────────────────────────────────────────────── -->
+    <div id="tab-deblur" class="tab-panel">
+      <div class="tool-layout">
+        <aside class="tool-sidebar">
+          <div class="tool-sidebar-inner">
+
+            <div class="section">
+              <div class="section-title">Blurry Image</div>
+              <div class="upload-zone" id="deblur-upload" style="height:200px">
+                <input type="file" id="deblur-file" accept="image/*">
+                <div class="uz-icon">📷</div>
+                <div class="uz-text">Drop a blurry image</div>
+                <div class="uz-hint">Optional: add a prompt for better sharpening</div>
+                <img id="deblur-img-preview" style="display:none">
+                <div class="uz-overlay"><span>Change Image</span></div>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Parameters</div>
+
+              <div class="field">
+                <div class="field-label">Prompt <span style="font-size:10px;color:var(--text-muted);font-weight:400">(optional but improves results)</span></div>
+                <textarea id="deblur-prompt" rows="3" placeholder="Describe the image content, e.g. 'a portrait of a woman outdoors'…" style="resize:vertical"></textarea>
+              </div>
+
+              <div class="field">
+                <div class="field-label">Output Format</div>
+                <select id="deblur-format">
+                  <option value="png">PNG</option>
+                  <option value="jpeg">JPEG</option>
+                  <option value="webp">WebP</option>
+                </select>
+              </div>
+            </div>
+
+          </div>
+          <div class="tool-sidebar-footer">
+            <button class="btn btn-primary btn-full" id="btn-deblur">✦ Deblur</button>
+          </div>
+        </aside>
+
+        <div class="tool-main">
+          <div class="status-bar hidden" id="deblur-status">
+            <div class="status-spinner"></div>
+            <span class="status-text">Deblurring…</span>
+            <span class="status-elapsed" id="deblur-elapsed">0s</span>
+          </div>
+          <div class="results-area" id="deblur-results">
+            <div class="results-placeholder"><div class="ph-icon">🔭</div><p>Sharpened result will appear here</p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── HISTORY ───────────────────────────────────────────────────────── -->
+    <div id="tab-history" class="tab-panel">
+      <div class="history-layout">
+        <div class="history-toolbar">
+          <div class="view-toggle" id="hist-view-toggle">
+            <button class="btn btn-secondary btn-sm active" data-view="gallery">🖼 Gallery</button>
+            <button class="btn btn-secondary btn-sm" data-view="log">📋 Prompt Log</button>
+          </div>
+          <select id="hist-filter-tool" style="width:140px">
+            <option value="">All Tools</option>
+            <option value="generate">Generate</option>
+            <option value="inpaint">Inpaint</option>
+            <option value="erase">Erase</option>
+            <option value="outpaint">Outpaint</option>
+            <option value="vto">VTO</option>
+            <option value="deblur">Deblur</option>
+          </select>
+          <input type="text" id="hist-search" placeholder="Search prompts…" style="width:200px;padding:5px 10px;font-size:12px">
+          <button class="btn btn-secondary btn-sm" id="hist-refresh">↺ Refresh</button>
+          <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-label)" id="hist-size-wrap">
+            <span>Size</span>
+            <input type="range" id="hist-size" min="120" max="400" value="220" step="10" style="width:80px">
+          </label>
+          <div style="flex:1"></div>
+          <a class="btn btn-secondary btn-sm" href="/api/log" download="flux_prompt_log.csv" id="hist-csv-download">⬇ Export CSV</a>
+          <button class="btn btn-danger btn-sm" id="hist-clear">Clear All</button>
+        </div>
+
+        <!-- Gallery view -->
+        <div class="history-grid-wrap" id="hist-gallery-wrap">
+          <div class="history-grid" id="history-grid"></div>
+          <div class="empty-state hidden" id="history-empty">
+            <div class="ei">🕐</div>
+            <p>No history yet. Generate something!</p>
+          </div>
+        </div>
+
+        <!-- Prompt Log table view -->
+        <div class="history-grid-wrap hidden" id="hist-log-wrap" style="padding:0">
+          <table id="hist-log-table" style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead style="position:sticky;top:0;background:var(--bg-surface);z-index:1">
+              <tr style="border-bottom:1px solid var(--border)">
+                <th class="sortable-col" data-col="timestamp" style="padding:10px 14px;text-align:left;color:var(--text-label);font-weight:600;white-space:nowrap;cursor:pointer;user-select:none">Timestamp <span class="sort-ind">↓</span></th>
+                <th class="sortable-col" data-col="tool"      style="padding:10px 14px;text-align:left;color:var(--text-label);font-weight:600;cursor:pointer;user-select:none">Tool <span class="sort-ind"></span></th>
+                <th class="sortable-col" data-col="model"     style="padding:10px 14px;text-align:left;color:var(--text-label);font-weight:600;cursor:pointer;user-select:none">Model <span class="sort-ind"></span></th>
+                <th class="sortable-col" data-col="prompt"    style="padding:10px 14px;text-align:left;color:var(--text-label);font-weight:600;min-width:300px;cursor:pointer;user-select:none">Prompt <span class="sort-ind"></span></th>
+                <th style="padding:10px 14px;text-align:left;color:var(--text-label);font-weight:600">Size</th>
+                <th class="sortable-col" data-col="seed"      style="padding:10px 14px;text-align:left;color:var(--text-label);font-weight:600;cursor:pointer;user-select:none">Seed <span class="sort-ind"></span></th>
+                <th class="sortable-col" data-col="cost"      style="padding:10px 14px;text-align:left;color:var(--text-label);font-weight:600;cursor:pointer;user-select:none">Cost <span class="sort-ind"></span></th>
+                <th style="padding:10px 14px;text-align:left;color:var(--text-label);font-weight:600">Img</th>
+              </tr>
+            </thead>
+            <tbody id="hist-log-body"></tbody>
+          </table>
+
+          <div class="empty-state hidden" id="hist-log-empty">
+            <div class="ei">📋</div>
+            <p>No log entries yet</p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ═══ LIGHTBOX ═════════════════════════════════════════════════════════════ -->
+<div class="lightbox hidden" id="lightbox">
+  <div class="lightbox-inner">
+    <button id="lightbox-prev" class="lb-nav lb-prev" title="Previous (←)">‹</button>
+    <button id="lightbox-next" class="lb-nav lb-next" title="Next (→)">›</button>
+    <div class="lightbox-img-wrap" style="position:relative;">
+      <img id="lightbox-img" src="" alt="">
+      <span id="lightbox-ab-label" style="
+        display:none; position:absolute; bottom:12px; left:50%; transform:translateX(-50%);
+        background:rgba(0,0,0,0.72); color:#fff; font-size:13px; font-weight:600;
+        padding:4px 14px; border-radius:20px; pointer-events:none; letter-spacing:0.03em;
+      "></span>
+    </div>
+    <div class="lightbox-footer">
+      <div class="lightbox-meta">
+        <div class="lightbox-prompt" id="lightbox-prompt"></div>
+        <div class="lightbox-detail" id="lightbox-detail"></div>
+      </div>
+      <a class="btn btn-secondary btn-sm" id="lightbox-download" download>↓ Download</a>
+      <button class="btn btn-secondary btn-sm" id="lightbox-ab" style="display:none;">A⇄B</button>
+      <button class="btn btn-secondary btn-sm" id="lightbox-reload" style="display:none;">↺ Reload Settings</button>
+      <button class="btn btn-secondary btn-sm" id="lightbox-send-gen">→ Generate</button>
+      <button class="btn btn-secondary btn-sm" id="lightbox-send-inpaint">→ Inpaint</button>
+      <button class="btn btn-secondary btn-sm" id="lightbox-close">✕ Close</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══ SHORTCUTS MODAL ═══════════════════════════════════════════════════════ -->
+<div id="shortcuts-modal" class="lightbox hidden">
+  <div class="lightbox-inner" style="max-width:520px;max-height:80vh;overflow-y:auto">
+    <div style="padding:28px 32px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+        <h2 style="margin:0;font-size:18px;font-weight:700">Keyboard Shortcuts</h2>
+        <button class="btn btn-secondary btn-sm" id="shortcuts-close">✕</button>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <tbody>
+          <tr><td colspan="2" style="padding:10px 0 6px;font-size:10px;font-weight:700;color:var(--text-label);letter-spacing:.08em;text-transform:uppercase">Generation</td></tr>
+          <tr class="sc-row"><td class="sc-key"><kbd>⌘ Enter</kbd></td><td class="sc-desc">Run current tab (Generate / Inpaint / Erase…)</td></tr>
+          <tr class="sc-row"><td class="sc-key"><kbd>⌘ V</kbd></td><td class="sc-desc">Paste image into active tab's upload zone</td></tr>
+
+          <tr><td colspan="2" style="padding:14px 0 6px;font-size:10px;font-weight:700;color:var(--text-label);letter-spacing:.08em;text-transform:uppercase">Lightbox</td></tr>
+          <tr class="sc-row"><td class="sc-key"><kbd>←</kbd> <kbd>→</kbd></td><td class="sc-desc">Previous / next image in history</td></tr>
+          <tr class="sc-row"><td class="sc-key"><kbd>Esc</kbd></td><td class="sc-desc">Close lightbox, painter, or this dialog</td></tr>
+
+          <tr><td colspan="2" style="padding:14px 0 6px;font-size:10px;font-weight:700;color:var(--text-label);letter-spacing:.08em;text-transform:uppercase">Reference Slots</td></tr>
+          <tr class="sc-row"><td class="sc-key">Click badge #</td><td class="sc-desc">Insert @image1 – @image8 at cursor in prompt</td></tr>
+          <tr class="sc-row"><td class="sc-key">Hover 1 s</td><td class="sc-desc">Full-size thumbnail popup</td></tr>
+          <tr class="sc-row"><td class="sc-key">Hover → click ✕</td><td class="sc-desc">Clear a reference slot</td></tr>
+
+          <tr><td colspan="2" style="padding:14px 0 6px;font-size:10px;font-weight:700;color:var(--text-label);letter-spacing:.08em;text-transform:uppercase">Result Cards</td></tr>
+          <tr class="sc-row"><td class="sc-key">Click image</td><td class="sc-desc">Open fullscreen lightbox</td></tr>
+          <tr class="sc-row"><td class="sc-key">A⇄B button</td><td class="sc-desc">Toggle output vs. Reference 1 comparison</td></tr>
+
+          <tr><td colspan="2" style="padding:14px 0 6px;font-size:10px;font-weight:700;color:var(--text-label);letter-spacing:.08em;text-transform:uppercase">Global</td></tr>
+          <tr class="sc-row"><td class="sc-key"><kbd>?</kbd></td><td class="sc-desc">Show this shortcut reference</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ TOAST ════════════════════════════════════════════════════════════════ -->
+<div id="toast-container"></div>
+
+<!-- ═══ FULLSCREEN PAINTER MODAL ════════════════════════════════════════════ -->
+<div id="painter-modal" class="painter-modal hidden">
+
+  <!-- Toolbar -->
+  <div class="pm-toolbar">
+    <div class="pm-toolbar-brand" id="pm-title">Mask Painter</div>
+
+    <div class="pm-tools">
+      <button class="btn btn-secondary btn-sm pm-mode-btn active" data-mode="paint" id="pm-paint-btn">🖌 Paint</button>
+      <button class="btn btn-secondary btn-sm pm-mode-btn" data-mode="erase" id="pm-erase-btn">⌫ Un-paint</button>
+
+      <div class="pm-sep"></div>
+
+      <div class="pm-brush-row">
+        <label class="pm-brush-label">Brush</label>
+        <input type="range" id="pm-brush-size" min="4" max="400" value="50">
+        <span id="pm-brush-val" class="pm-brush-val">50</span>
+      </div>
+
+      <div class="pm-sep"></div>
+
+      <button class="btn btn-secondary btn-sm" id="pm-clear-btn">Clear All</button>
+      <button class="btn btn-secondary btn-sm" id="pm-invert-btn">Invert</button>
+
+      <div class="pm-sep"></div>
+
+      <label class="pm-overlay-label">
+        <input type="checkbox" id="pm-overlay-toggle" checked>
+        Show overlay
+      </label>
+    </div>
+
+    <div class="pm-toolbar-right">
+      <span id="pm-dims-label" class="pm-dims"></span>
+      <button class="btn btn-secondary" id="pm-cancel-btn">Cancel</button>
+      <button class="btn btn-primary" id="pm-done-btn">✓ Apply Mask</button>
+    </div>
+  </div>
+
+  <!-- Canvas area -->
+  <div class="pm-body">
+    <div class="pm-scroll">
+      <div class="pm-image-wrap" id="pm-image-wrap">
+        <img id="pm-source-img" alt="" draggable="false">
+        <canvas id="pm-canvas"></canvas>
+      </div>
+    </div>
+    <!-- Hint strip at bottom -->
+    <div class="pm-hint" id="pm-hint-strip">
+      🖌 Paint the area you want to modify · ⌫ Un-paint to remove brush strokes · Scroll to zoom · Brush size slider above
+    </div>
+  </div>
+</div>
+
+<script src="app.js" type="module"></script>
+</body>
+
+</html>

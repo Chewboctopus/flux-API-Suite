@@ -1,0 +1,72 @@
+{
+  "name": "flux-studio",
+  "version": "2.0.0",
+  "description": "Full-featured local suite for the BFL FLUX API — Generate, Inpaint, Erase, Outpaint, VTO, Deblur",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "start":            "node server.js",
+    "dev":              "node --watch server.js",
+    "electron":         "electron .",
+    "electron:build":   "electron-builder",
+    "electron:build:mac": "electron-builder --mac",
+    "electron:build:win": "electron-builder --win",
+    "electron:build:linux": "electron-builder --linux"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "multer":  "^2.2.0"
+  },
+  "devDependencies": {
+    "electron":         "^36.4.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId":       "com.bfl.flux-studio",
+    "productName": "FLUX Studio",
+    "copyright":   "Black Forest Labs",
+    "icon":        "build/icon.png",
+    "publish": {
+      "provider": "github",
+      "releaseType": "release"
+    },
+    "directories": {
+      "output":    "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**",
+      "public/**",
+      "server.js",
+      "node_modules/**",
+      "package.json"
+    ],
+    "mac": {
+      "category":       "public.app-category.graphics-and-design",
+      "darkModeSupport": true,
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] }
+      ]
+    },
+    "dmg": {
+      "title":   "FLUX Studio",
+      "icon":    "build/icon.png",
+      "window":  { "width": 580, "height": 380 }
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick":            true,
+      "perMachine":          false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Graphics"
+    }
+  }
+}
