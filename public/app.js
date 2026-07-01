@@ -432,19 +432,43 @@ function buildResultCard(entry, onSendInpaint, onSendGenerate) {
       <div class="result-meta">${[shortId, cost, seed].filter(Boolean).join(' · ')}</div>
       <div class="result-actions">
         <a class="btn btn-secondary" href="${entry.image_url}" download target="_blank">↓</a>
+        <button class="btn btn-secondary" data-action="copy" title="Copy to clipboard">📋</button>
         ${hasRef ? '<button class="btn btn-secondary" data-action="ab" title="Toggle A/B compare with reference">A⇄B</button>' : ''}
-        <button class="btn btn-secondary" data-action="inpaint">→ Inpaint</button>
-        <button class="btn btn-secondary" data-action="generate">→ Generate</button>
+        <div class="rc-sendto-wrap">
+          <button class="btn btn-primary btn-sm" data-action="sendto">Send to ▾</button>
+          <div class="lb-sendto-menu hidden rc-sendto-menu">
+            <button data-sendto="generate">🎨 Generate <span class="lb-sendto-hint">as ref</span></button>
+            <button data-sendto="inpaint">🖌 Inpaint</button>
+            <button data-sendto="erase">🧹 Erase</button>
+            <button data-sendto="outpaint">📐 Outpaint</button>
+            <button data-sendto="vto">👕 Try-On</button>
+            <button data-sendto="deblur">🔍 Deblur</button>
+          </div>
+        </div>
       </div>
     </div>`;
 
   const cardImg   = card.querySelector('img');
   const abLabel   = card.querySelector('.rc-ab-label');
-  let   abState   = 'generated'; // 'generated' | 'ref'
+  let   abState   = 'generated';
+  const rcMenu    = card.querySelector('.rc-sendto-menu');
 
   cardImg.addEventListener('click', () => openLightbox(entry));
-  card.querySelector('[data-action=inpaint]').addEventListener('click', () => onSendInpaint?.(entry));
-  card.querySelector('[data-action=generate]').addEventListener('click', () => onSendGenerate?.(entry));
+
+  card.querySelector('[data-action=copy]').addEventListener('click', () => copyImageToClipboard(entry.image_url));
+
+  card.querySelector('[data-action=sendto]').addEventListener('click', (e) => {
+    e.stopPropagation();
+    // Close all other open menus first
+    document.querySelectorAll('.rc-sendto-menu').forEach(m => { if (m !== rcMenu) m.classList.add('hidden'); });
+    rcMenu.classList.toggle('hidden');
+  });
+  rcMenu.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-sendto]');
+    if (!btn) return;
+    rcMenu.classList.add('hidden');
+    sendToTool(btn.dataset.sendto, entry.image_url, entry);
+  });
 
   if (hasRef) {
     card.querySelector('[data-action=ab]').addEventListener('click', (e) => {
@@ -493,6 +517,7 @@ function openLightbox(entry, contextList, contextIndex) {
   }
   _lbUpdateNav();
 
+  lbZoomReset(true); // reset pan/zoom for every new image
   const lbImg    = document.getElementById('lightbox-img');
   const lbLabel  = document.getElementById('lightbox-ab-label');
   const lbAbBtn  = document.getElementById('lightbox-ab');
@@ -612,25 +637,234 @@ function reloadEntrySettings(e) {
 
 document.getElementById('lightbox-close').addEventListener('click', () => {
   document.getElementById('lightbox').classList.add('hidden');
+  lbZoomReset(true);
 });
 document.getElementById('lightbox').addEventListener('click', e => {
-  if (e.target === document.getElementById('lightbox'))
+  if (e.target === document.getElementById('lightbox')) {
     document.getElementById('lightbox').classList.add('hidden');
-});
-document.getElementById('lightbox-send-inpaint').addEventListener('click', () => {
-  if (_lightboxEntry) {
-    switchTab('inpaint');
-    setTimeout(() => inpaintUZ.setFromUrl(_lightboxEntry.image_url), 100);
-    document.getElementById('lightbox').classList.add('hidden');
+    lbZoomReset(true);
   }
 });
-document.getElementById('lightbox-send-gen').addEventListener('click', () => {
-  if (_lightboxEntry) {
-    switchTab('generate');
-    if (_lightboxEntry.prompt) document.getElementById('gen-prompt').value = _lightboxEntry.prompt;
-    document.getElementById('lightbox').classList.add('hidden');
+
+// ─── Zoom / Pan / Fullscreen ──────────────────────────────────────────────────
+const LBZ = { scale: 1, x: 0, y: 0 };
+const LBZ_MIN = 0.5, LBZ_MAX = 12;
+let _lbDrag = null;
+let _lbPinch = null;
+
+const _lbImg  = () => document.getElementById('lightbox-img');
+const _lbWrap = () => _lbImg()?.closest('.lightbox-img-wrap');
+
+function lbZoomApply(animate = false) {
+  const img = _lbImg(); if (!img) return;
+  if (animate) { img.style.transition = 'transform .2s ease'; setTimeout(() => img.style.transition = '', 250); }
+  img.style.transform = `translate(${LBZ.x}px,${LBZ.y}px) scale(${LBZ.scale})`;
+  document.getElementById('lb-zoom-pct').textContent = Math.round(LBZ.scale * 100) + '%';
+  const w = _lbWrap();
+  w.classList.toggle('lb-pannable', LBZ.scale > 1.01);
+  w.classList.toggle('lb-zoomable', LBZ.scale <= 1.01);
+}
+
+function lbZoomReset(skipAnim) {
+  LBZ.scale = 1; LBZ.x = 0; LBZ.y = 0;
+  lbZoomApply(!skipAnim);
+}
+
+function lbZoomTo1to1() {
+  const img = _lbImg(); if (!img || !img.naturalWidth) return;
+  const w = _lbWrap();
+  const wW = w.clientWidth, wH = w.clientHeight;
+  const nW = img.naturalWidth, nH = img.naturalHeight;
+  const aspectImg = nW / nH, aspectWrap = wW / wH;
+  let dW;
+  if (aspectImg > aspectWrap) dW = wW; else dW = wH * aspectImg;
+  LBZ.scale = Math.min(LBZ_MAX, nW / dW);
+  LBZ.x = 0; LBZ.y = 0;
+  lbZoomApply(true);
+}
+
+function lbZoomBy(factor, cx, cy) {
+  const wrap = _lbWrap(); if (!wrap) return;
+  const rect = wrap.getBoundingClientRect();
+  const originX = (cx ?? rect.left + rect.width  / 2) - rect.left - rect.width  / 2;
+  const originY = (cy ?? rect.top  + rect.height / 2) - rect.top  - rect.height / 2;
+  const oldScale = LBZ.scale;
+  const newScale = Math.max(LBZ_MIN, Math.min(LBZ_MAX, oldScale * factor));
+  const imgX = (originX - LBZ.x) / oldScale;
+  const imgY = (originY - LBZ.y) / oldScale;
+  LBZ.x = originX - newScale * imgX;
+  LBZ.y = originY - newScale * imgY;
+  LBZ.scale = newScale;
+  lbZoomApply();
+}
+
+// Wheel zoom
+_lbWrap() && (() => {}) (); // ensure wrap exists at page load (it does)
+document.getElementById('lightbox').addEventListener('wheel', e => {
+  if (!_lbImg().src) return;
+  e.preventDefault();
+  const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+  lbZoomBy(factor, e.clientX, e.clientY);
+}, { passive: false });
+
+// Mouse drag
+document.getElementById('lightbox').addEventListener('mousedown', e => {
+  if (e.target.closest('.lb-zoom-bar, .lightbox-footer, .lb-nav, .lb-sendto-menu')) return;
+  if (LBZ.scale <= 1.01) return;
+  _lbDrag = { sx: e.clientX, sy: e.clientY, ox: LBZ.x, oy: LBZ.y };
+  _lbWrap()?.classList.add('lb-dragging');
+  e.preventDefault();
+});
+document.addEventListener('mousemove', e => {
+  if (!_lbDrag) return;
+  LBZ.x = _lbDrag.ox + (e.clientX - _lbDrag.sx);
+  LBZ.y = _lbDrag.oy + (e.clientY - _lbDrag.sy);
+  lbZoomApply();
+});
+document.addEventListener('mouseup', () => {
+  if (!_lbDrag) return;
+  _lbDrag = null;
+  _lbWrap()?.classList.remove('lb-dragging');
+});
+
+// Double-click: toggle 1:1 ↔ fit
+document.getElementById('lightbox').addEventListener('dblclick', e => {
+  if (e.target.closest('.lightbox-footer, .lb-zoom-bar, .lb-nav')) return;
+  if (LBZ.scale > 1.05) { lbZoomReset(); } else { lbZoomTo1to1(); }
+});
+
+// Touch: pinch-zoom + single-finger pan
+document.getElementById('lightbox').addEventListener('touchstart', e => {
+  if (e.touches.length === 2) {
+    const [a, b] = e.touches;
+    _lbPinch = {
+      dist: Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY),
+      cx: (a.clientX + b.clientX) / 2, cy: (a.clientY + b.clientY) / 2,
+      ox: LBZ.x, oy: LBZ.y, os: LBZ.scale
+    };
+    _lbDrag = null;
+  } else if (e.touches.length === 1 && LBZ.scale > 1.01) {
+    _lbDrag = { sx: e.touches[0].clientX, sy: e.touches[0].clientY, ox: LBZ.x, oy: LBZ.y };
+  }
+}, { passive: true });
+document.getElementById('lightbox').addEventListener('touchmove', e => {
+  if (e.touches.length === 2 && _lbPinch) {
+    const [a, b] = e.touches;
+    const dist = Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+    const factor = dist / _lbPinch.dist;
+    const wrap = _lbWrap();
+    const rect = wrap.getBoundingClientRect();
+    const cx = (a.clientX + b.clientX) / 2 - rect.left - rect.width / 2;
+    const cy = (a.clientY + b.clientY) / 2 - rect.top  - rect.height / 2;
+    const imgX = (cx - _lbPinch.ox) / _lbPinch.os;
+    const imgY = (cy - _lbPinch.oy) / _lbPinch.os;
+    LBZ.scale = Math.max(LBZ_MIN, Math.min(LBZ_MAX, _lbPinch.os * factor));
+    LBZ.x = cx - LBZ.scale * imgX;
+    LBZ.y = cy - LBZ.scale * imgY;
+    lbZoomApply();
+    e.preventDefault();
+  } else if (e.touches.length === 1 && _lbDrag) {
+    LBZ.x = _lbDrag.ox + (e.touches[0].clientX - _lbDrag.sx);
+    LBZ.y = _lbDrag.oy + (e.touches[0].clientY - _lbDrag.sy);
+    lbZoomApply();
+    e.preventDefault();
+  }
+}, { passive: false });
+document.getElementById('lightbox').addEventListener('touchend', () => {
+  _lbPinch = null; _lbDrag = null;
+});
+
+// Zoom toolbar buttons
+document.getElementById('lb-zoom-out').addEventListener('click', () => lbZoomBy(1 / 1.4));
+document.getElementById('lb-zoom-in' ).addEventListener('click', () => lbZoomBy(1.4));
+document.getElementById('lb-zoom-fit').addEventListener('click', () => lbZoomReset());
+document.getElementById('lb-zoom-1to1').addEventListener('click', lbZoomTo1to1);
+
+// Fullscreen
+const _lbFsBtn = document.getElementById('lb-fullscreen-btn');
+_lbFsBtn.addEventListener('click', () => {
+  const el = document.getElementById('lightbox');
+  if (!document.fullscreenElement) {
+    (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+  } else {
+    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
   }
 });
+document.addEventListener('fullscreenchange', () => {
+  _lbFsBtn.textContent = document.fullscreenElement ? '⊡' : '⛶';
+});
+document.addEventListener('webkitfullscreenchange', () => {
+  _lbFsBtn.textContent = document.webkitFullscreenElement ? '⊡' : '⛶';
+});
+
+// ─── Send-to helper (works from lightbox OR history card) ─────────────────────
+function sendToTool(tool, imageUrl, entry) {
+  const closeLightbox = () => document.getElementById('lightbox').classList.add('hidden');
+
+  // Map tool → tab name + which upload zone / ref slot to fill
+  const actions = {
+    generate: () => {
+      switchTab('generate');
+      if (entry?.prompt) document.getElementById('gen-prompt').value = entry.prompt;
+      // Load into first reference slot
+      setTimeout(() => {
+        const refSlots = document.querySelectorAll('#gen-refs-grid .ref-slot');
+        if (refSlots[0]?.setFromUrl) refSlots[0].setFromUrl(imageUrl);
+      }, 120);
+    },
+    inpaint:  () => { switchTab('inpaint');  setTimeout(() => inpaintUZ.setFromUrl(imageUrl), 120); },
+    erase:    () => { switchTab('erase');    setTimeout(() => eraseUZ.setFromUrl(imageUrl),   120); },
+    outpaint: () => { switchTab('outpaint'); setTimeout(() => outpaintUZ.setFromUrl(imageUrl), 120); },
+    vto:      () => { switchTab('vto');      setTimeout(() => vtoPersonUZ.setFromUrl(imageUrl), 120); },
+    deblur:   () => { switchTab('deblur');   setTimeout(() => deblurUZ.setFromUrl(imageUrl),  120); },
+  };
+
+  if (actions[tool]) {
+    actions[tool]();
+    closeLightbox();
+    toast(`↗ Sent to ${tool}`, 'info');
+  }
+}
+
+// ─── Copy image to clipboard ───────────────────────────────────────────────────
+async function copyImageToClipboard(url) {
+  try {
+    const res  = await fetch(url);
+    const blob = await res.blob();
+    const type = blob.type?.startsWith('image/') ? blob.type : 'image/png';
+    await navigator.clipboard.write([new ClipboardItem({ [type]: blob })]);
+    toast('✓ Image copied to clipboard', 'success');
+  } catch (e) {
+    toast('Copy failed: ' + e.message, 'warn');
+  }
+}
+
+document.getElementById('lightbox-copy').addEventListener('click', () => {
+  if (_lightboxEntry) copyImageToClipboard(_lightboxEntry.image_url);
+});
+
+// ─── Send-to dropdown (lightbox) ──────────────────────────────────────────────
+const _lbSendMenu = document.getElementById('lb-sendto-menu');
+
+document.getElementById('lb-sendto-btn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  _lbSendMenu.classList.toggle('hidden');
+});
+
+_lbSendMenu.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-sendto]');
+  if (!btn) return;
+  _lbSendMenu.classList.add('hidden');
+  if (_lightboxEntry) sendToTool(btn.dataset.sendto, _lightboxEntry.image_url, _lightboxEntry);
+});
+
+// Close dropdown on outside click
+document.addEventListener('click', (e) => {
+  if (!document.getElementById('lb-sendto-wrap')?.contains(e.target)) {
+    _lbSendMenu?.classList.add('hidden');
+  }
+});
+
 
 // ─── Tab Router ───────────────────────────────────────────────────────────────
 function switchTab(name) {
@@ -1538,15 +1772,40 @@ function renderHistory() {
         </div>
         <div class="history-actions">
           <a class="btn btn-secondary btn-sm" href="${entry.image_url}" download>↓</a>
+          <button class="btn btn-secondary btn-sm" data-action="copy" title="Copy to clipboard">📋</button>
           ${refPreview ? '<button class="btn btn-secondary btn-sm hc-ab-btn">A⇄B</button>' : ''}
-          <button class="btn btn-secondary btn-sm" data-action="inpaint">→ Inpaint</button>
-          <button class="btn btn-secondary btn-sm" data-action="generate">→ Generate</button>
+          <div class="rc-sendto-wrap">
+            <button class="btn btn-primary btn-sm" data-action="hc-sendto">Send to ▾</button>
+            <div class="lb-sendto-menu hidden hc-sendto-menu">
+              <button data-sendto="generate">🎨 Generate <span class="lb-sendto-hint">as ref</span></button>
+              <button data-sendto="inpaint">🖌 Inpaint</button>
+              <button data-sendto="erase">🧹 Erase</button>
+              <button data-sendto="outpaint">📐 Outpaint</button>
+              <button data-sendto="vto">👕 Try-On</button>
+              <button data-sendto="deblur">🔍 Deblur</button>
+            </div>
+          </div>
         </div>
       </div>`;
 
     const cardImg = card.querySelector('img');
     const abLabel = card.querySelector('.hc-ab-label');
     let abState   = 'generated';
+    const hcMenu  = card.querySelector('.hc-sendto-menu');
+
+    card.querySelector('[data-action=copy]').addEventListener('click', () => copyImageToClipboard(entry.image_url));
+
+    card.querySelector('[data-action=hc-sendto]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('.hc-sendto-menu').forEach(m => { if (m !== hcMenu) m.classList.add('hidden'); });
+      hcMenu.classList.toggle('hidden');
+    });
+    hcMenu.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-sendto]');
+      if (!btn) return;
+      hcMenu.classList.add('hidden');
+      sendToTool(btn.dataset.sendto, entry.image_url, entry);
+    });
 
     const abBtn = card.querySelector('.hc-ab-btn');
     if (abBtn) {

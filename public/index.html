@@ -654,6 +654,14 @@
         background:rgba(0,0,0,0.72); color:#fff; font-size:13px; font-weight:600;
         padding:4px 14px; border-radius:20px; pointer-events:none; letter-spacing:0.03em;
       "></span>
+      <div class="lb-zoom-bar" id="lb-zoom-bar">
+        <button class="lb-zoom-btn" id="lb-zoom-out" title="Zoom out">−</button>
+        <span id="lb-zoom-pct" class="lb-zoom-pct">100%</span>
+        <button class="lb-zoom-btn" id="lb-zoom-in" title="Zoom in">+</button>
+        <div class="lb-zoom-sep"></div>
+        <button class="lb-zoom-btn" id="lb-zoom-fit" title="Fit to window">Fit</button>
+        <button class="lb-zoom-btn" id="lb-zoom-1to1" title="1:1 pixels — one screen pixel per image pixel">1:1</button>
+      </div>
     </div>
     <div class="lightbox-footer">
       <div class="lightbox-meta">
@@ -661,11 +669,22 @@
         <div class="lightbox-detail" id="lightbox-detail"></div>
       </div>
       <a class="btn btn-secondary btn-sm" id="lightbox-download" download>↓ Download</a>
+      <button class="btn btn-secondary btn-sm" id="lightbox-copy" title="Copy image to clipboard">📋 Copy</button>
       <button class="btn btn-secondary btn-sm" id="lightbox-ab" style="display:none;">A⇄B</button>
       <button class="btn btn-secondary btn-sm" id="lightbox-reload" style="display:none;">↺ Reload Settings</button>
-      <button class="btn btn-secondary btn-sm" id="lightbox-send-gen">→ Generate</button>
-      <button class="btn btn-secondary btn-sm" id="lightbox-send-inpaint">→ Inpaint</button>
+      <div class="lb-sendto-wrap" id="lb-sendto-wrap">
+        <button class="btn btn-primary btn-sm" id="lb-sendto-btn">Send to ▾</button>
+        <div class="lb-sendto-menu hidden" id="lb-sendto-menu">
+          <button data-sendto="generate">🎨 Generate <span class="lb-sendto-hint">as reference</span></button>
+          <button data-sendto="inpaint">🖌 Inpaint</button>
+          <button data-sendto="erase">🧹 Erase</button>
+          <button data-sendto="outpaint">📐 Outpaint</button>
+          <button data-sendto="vto">👕 Try-On <span class="lb-sendto-hint">person slot</span></button>
+          <button data-sendto="deblur">🔍 Deblur</button>
+        </div>
+      </div>
       <button class="btn btn-secondary btn-sm" id="lightbox-close">✕ Close</button>
+      <button class="btn btn-secondary btn-sm" id="lb-fullscreen-btn" title="Toggle fullscreen">⛶</button>
     </div>
   </div>
 </div>
