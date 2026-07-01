@@ -102,22 +102,29 @@
 
             <div class="section">
               <div class="section-title">Size</div>
-              <div class="row">
+              <div class="size-row">
                 <div class="field">
                   <div class="field-label">Width</div>
                   <input type="number" id="gen-width" value="1024" min="64" max="4096" step="8">
                 </div>
+                <button class="ar-lock-btn" id="gen-ar-lock" title="Lock aspect ratio">🔓</button>
                 <div class="field">
                   <div class="field-label">Height</div>
                   <input type="number" id="gen-height" value="1024" min="64" max="4096" step="8">
                 </div>
               </div>
-              <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px" id="gen-presets">
+              <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px" id="gen-presets">
                 <button class="btn btn-secondary btn-sm" data-w="1024" data-h="1024">1:1</button>
                 <button class="btn btn-secondary btn-sm" data-w="1344" data-h="768">16:9</button>
                 <button class="btn btn-secondary btn-sm" data-w="768" data-h="1344">9:16</button>
                 <button class="btn btn-secondary btn-sm" data-w="1216" data-h="832">3:2</button>
                 <button class="btn btn-secondary btn-sm" data-w="832" data-h="1216">2:3</button>
+              </div>
+              <div class="size-scale-row" id="gen-size-presets">
+                <span class="size-scale-label">Scale:</span>
+                <button class="btn btn-secondary btn-sm" data-size="1024">1K</button>
+                <button class="btn btn-secondary btn-sm" data-size="2048">2K</button>
+                <button class="btn btn-secondary btn-sm" data-size="max">Max <span style="opacity:.55;font-size:10px">(4MP)</span></button>
               </div>
             </div>
 

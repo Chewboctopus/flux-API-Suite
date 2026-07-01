@@ -951,11 +951,79 @@ function createRefSlot(i) {
 for (let i = 0; i < 8; i++) createRefSlot(i);
 
 // Aspect ratio presets
+// ─── Aspect ratio lock + size scale presets ───────────────────────────────────
+const _gW   = () => document.getElementById('gen-width');
+const _gH   = () => document.getElementById('gen-height');
+const _lock = () => document.getElementById('gen-ar-lock');
+
+let GEN_AR_LOCKED = false;
+let GEN_AR_RATIO  = 1; // w / h
+
+function _snap8(n) { return Math.max(64, Math.min(4096, Math.round(n / 8) * 8)); }
+
+function _applyARLock(changed) {
+  if (!GEN_AR_LOCKED) return;
+  if (changed === 'w') {
+    _gH().value = _snap8(parseInt(_gW().value) / GEN_AR_RATIO);
+  } else {
+    _gW().value = _snap8(parseInt(_gH().value) * GEN_AR_RATIO);
+  }
+}
+
+_gW().addEventListener('input', () => _applyARLock('w'));
+_gH().addEventListener('input', () => _applyARLock('h'));
+
+_lock().addEventListener('click', () => {
+  GEN_AR_LOCKED = !GEN_AR_LOCKED;
+  const w = parseInt(_gW().value) || 1024;
+  const h = parseInt(_gH().value) || 1024;
+  GEN_AR_RATIO = w / h;
+  _lock().textContent = GEN_AR_LOCKED ? '🔒' : '🔓';
+  _lock().classList.toggle('locked', GEN_AR_LOCKED);
+  if (GEN_AR_LOCKED) toast(`Ratio locked ${w}:${h}`, 'info');
+});
+
 document.getElementById('gen-presets').addEventListener('click', e => {
   const btn = e.target.closest('[data-w]');
   if (!btn) return;
-  document.getElementById('gen-width').value  = btn.dataset.w;
-  document.getElementById('gen-height').value = btn.dataset.h;
+  _gW().value = btn.dataset.w;
+  _gH().value = btn.dataset.h;
+  // Update locked ratio to match new preset
+  if (GEN_AR_LOCKED) GEN_AR_RATIO = parseInt(btn.dataset.w) / parseInt(btn.dataset.h);
+});
+
+// Scale presets (1K / 2K / Max)
+document.getElementById('gen-size-presets').addEventListener('click', e => {
+  const btn = e.target.closest('[data-size]');
+  if (!btn) return;
+
+  const w = parseInt(_gW().value) || 1024;
+  const h = parseInt(_gH().value) || 1024;
+  const ratio = w / h; // current width-to-height ratio
+
+  function applyLong(targetLong) {
+    let newW, newH;
+    if (ratio >= 1) { newW = targetLong; newH = targetLong / ratio; }
+    else            { newH = targetLong; newW = targetLong * ratio; }
+    // Clamp to 4MP
+    const px = newW * newH;
+    if (px > 4_000_000) {
+      const s = Math.sqrt(4_000_000 / px);
+      newW *= s; newH *= s;
+    }
+    _gW().value = _snap8(newW);
+    _gH().value = _snap8(newH);
+    if (GEN_AR_LOCKED) GEN_AR_RATIO = parseInt(_gW().value) / parseInt(_gH().value);
+  }
+
+  if (btn.dataset.size === 'max') {
+    // Compute the long edge that fills exactly 4MP at current ratio
+    const longRatio = ratio >= 1 ? ratio : 1 / ratio;
+    const maxLong   = Math.sqrt(4_000_000 * longRatio);
+    applyLong(maxLong);
+  } else {
+    applyLong(parseInt(btn.dataset.size));
+  }
 });
 
 document.getElementById('btn-generate').addEventListener('click', async () => {
