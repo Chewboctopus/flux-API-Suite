@@ -20,7 +20,10 @@ const CSV_FILE     = join(DATA_DIR, 'generations.csv');
 mkdirSync(UPLOADS_DIR, { recursive: true });
 mkdirSync(OUTPUTS_DIR, { recursive: true });
 if (!existsSync(HISTORY_FILE)) writeFileSync(HISTORY_FILE, '[]');
-if (!existsSync(CSV_FILE)) writeFileSync(CSV_FILE, 'id,timestamp,tool,model,prompt,width,height,seed,output_format,cost_credits,image_url\n');
+if (!existsSync(CSV_FILE))     writeFileSync(CSV_FILE, 'id,timestamp,tool,model,prompt,width,height,seed,output_format,cost_credits,image_url\n');
+const CONFIG_FILE  = join(DATA_DIR, 'config.json');
+if (!existsSync(CONFIG_FILE)) writeFileSync(CONFIG_FILE, JSON.stringify({ port: 4242 }, null, 2));
+
 
 // ─── Multer ───────────────────────────────────────────────────────────────────
 const storage = multer.diskStorage({
@@ -131,7 +134,7 @@ function appendHistory(entry) {
   try {
     const h = JSON.parse(readFileSync(HISTORY_FILE, 'utf8'));
     h.unshift(entry);
-    if (h.length > 500) h.splice(500);
+    if (h.length > 10000) h.splice(10000);
     writeFileSync(HISTORY_FILE, JSON.stringify(h, null, 2));
     appendCsv(entry);
   } catch (e) { console.error('History write failed:', e.message); }
@@ -412,6 +415,37 @@ app.post('/api/deblur', async (req, res) => {
     appendHistory(entry);
     res.json(entry);
   } catch (e) { handleError(res, e); }
+});
+
+// ─── App Config ───────────────────────────────────────────────────────────────
+app.get('/api/config', (_req, res) => {
+  try { res.json(JSON.parse(readFileSync(CONFIG_FILE, 'utf8'))); }
+  catch { res.json({ port: 4242 }); }
+});
+
+app.post('/api/config', (req, res) => {
+  try {
+    let current = {};
+    try { current = JSON.parse(readFileSync(CONFIG_FILE, 'utf8')); } catch {}
+    const updated = { ...current, ...req.body };
+    writeFileSync(CONFIG_FILE, JSON.stringify(updated, null, 2));
+    res.json({ ok: true });
+  } catch (e) { handleError(res, e); }
+});
+
+// ─── Ping — identity probe so a new instance can detect us ────────────────────
+app.get('/api/ping', (_req, res) => {
+  res.json({ app: 'flux-studio', version: '2.0.0' });
+});
+
+// ─── Quit — new-instance takeover (localhost only) ────────────────────────────
+app.post('/api/quit', (req, res) => {
+  const addr = req.socket.remoteAddress;
+  if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(addr)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  res.json({ ok: true });
+  setTimeout(() => process.exit(0), 300);
 });
 
 // ─── History ──────────────────────────────────────────────────────────────────

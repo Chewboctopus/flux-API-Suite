@@ -48,6 +48,7 @@
       <div id="alltime-badge" class="credit-badge alltime-badge" title="Total credits spent with this API key (all history)">All Time: <span class="cval-alltime" id="alltime-spend">0 cr · $0.00</span></div>
       <div id="session-badge" class="credit-badge session-badge" title="Credits spent today (1 credit = $0.01)">Today: <span class="cval-spend" id="session-spend">0 cr · $0.00</span></div>
       <button class="btn btn-secondary btn-sm" id="btn-shortcuts" title="Keyboard shortcuts (?)">?</button>
+      <button class="btn btn-secondary btn-sm" id="btn-settings" title="Settings">⚙</button>
       <button class="btn btn-secondary btn-sm" id="btn-changekey">Change Key</button>
     </div>
   </header>
@@ -685,6 +686,40 @@
         <img id="compare-img-b" src="" alt="">
         <div class="compare-panel-meta" id="compare-meta-b"></div>
       </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══ SETTINGS MODAL ═══════════════════════════════════════════════════════ -->
+<div id="settings-modal" class="lightbox hidden">
+  <div class="settings-inner">
+    <div class="settings-header">
+      <span class="settings-title">⚙ Settings</span>
+      <button class="btn btn-secondary btn-sm" id="settings-close">✕</button>
+    </div>
+    <div class="settings-body">
+
+      <div class="settings-section">
+        <div class="settings-section-title">Network Port</div>
+        <div class="settings-port-info">
+          <strong>Why this matters:</strong> FLUX Studio saves your API key and generation history in your
+          browser's local storage, which is scoped to the app's port number. If the port changes between
+          launches, the app behaves as a fresh install — your key and history appear gone. Keep this port
+          fixed to a number you'll use permanently.
+        </div>
+        <label class="settings-label" for="settings-port">Port number <span style="color:var(--text-muted);font-weight:400">(1024– 65535)</span></label>
+        <div style="display:flex;gap:10px;align-items:center">
+          <input type="number" id="settings-port" class="settings-input" min="1024" max="65535" placeholder="4242">
+          <span id="settings-port-current" style="font-size:12px;color:var(--text-muted);white-space:nowrap"></span>
+        </div>
+      </div>
+
+    </div>
+    <div class="settings-footer">
+      <span id="settings-status" style="font-size:12px;color:var(--text-muted);flex:1"></span>
+      <button class="btn btn-secondary btn-sm" id="settings-close-2">✕ Cancel</button>
+      <button class="btn btn-primary btn-sm" id="settings-save">✓ Save &amp; Restart</button>
     </div>
   </div>
 </div>

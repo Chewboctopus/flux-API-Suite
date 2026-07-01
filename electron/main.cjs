@@ -4,55 +4,78 @@
 // process regardless of the project's "type": "module" setting.
 // The Express server (server.js) is an ES module loaded via dynamic import().
 
-const { app, BrowserWindow, shell, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, shell, Menu, ipcMain } = require('electron');
 const path   = require('path');
 const http   = require('http');
 const net    = require('net');
+const fs     = require('fs');
 const { pathToFileURL } = require('url');
 
-// ── Config ────────────────────────────────────────────────────────────────────
-const IS_DEV   = !app.isPackaged;
-const APP_NAME = 'FLUX Studio';
+// ── Constants ─────────────────────────────────────────────────────────────────
+const IS_DEV       = !app.isPackaged;
+const APP_NAME     = 'FLUX Studio';
+const DEFAULT_PORT = 4242;
 
 // Data lives in ~/Documents/FLUX Studio/ — easy for users to find outputs
-const DATA_DIR = path.join(
-  app.getPath('documents'),
-  'FLUX Studio',
-  'data'
-);
+const DATA_DIR    = path.join(app.getPath('documents'), 'FLUX Studio', 'data');
+const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 
 let mainWindow = null;
 let serverPort = null;
 
-// ── Find preferred port (fixed = stable localStorage origin across launches) ──
-const PREFERRED_PORT = 4242;
+// ── Persistent config ─────────────────────────────────────────────────────────
+function loadConfig() {
+  try { return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); }
+  catch { return { port: DEFAULT_PORT }; }
+}
 
-function findPreferredPort() {
+function saveConfig(data) {
+  try {
+    fs.mkdirSync(path.dirname(CONFIG_FILE), { recursive: true });
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(data, null, 2));
+  } catch (e) { console.error('Config save failed:', e.message); }
+}
+
+// ── Port helpers ──────────────────────────────────────────────────────────────
+function isPortFree(port) {
   return new Promise((resolve) => {
     const srv = net.createServer();
-    srv.once('error', () => {
-      // 4242 busy — fall back to any free port
-      const fb = net.createServer();
-      fb.listen(0, '127.0.0.1', () => {
-        const { port } = fb.address();
-        fb.close(() => resolve(port));
-      });
-      fb.on('error', () => resolve(PREFERRED_PORT + 1)); // last resort
-    });
-    srv.listen(PREFERRED_PORT, '127.0.0.1', () => {
-      srv.close(() => resolve(PREFERRED_PORT));
-    });
+    srv.once('error', () => resolve(false));
+    srv.listen(port, '127.0.0.1', () => { srv.close(() => resolve(true)); });
   });
 }
 
-// ── Poll until server responds ─────────────────────────────────────────────────
+function httpGetJSON(url) {
+  return new Promise((resolve, reject) => {
+    const req = http.get(url, { timeout: 1500 }, (res) => {
+      let data = '';
+      res.on('data', d => data += d);
+      res.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve(null); } });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+  });
+}
+
+function httpPost(url) {
+  return new Promise((resolve) => {
+    const u = new URL(url);
+    const opts = {
+      hostname: u.hostname, port: u.port, path: u.pathname,
+      method: 'POST', timeout: 1500,
+    };
+    const req = http.request(opts, (res) => { res.resume(); resolve(res.statusCode); });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+    req.end();
+  });
+}
+
+// ── Poll until server responds ────────────────────────────────────────────────
 function waitForServer(port, retries = 40) {
   return new Promise((resolve, reject) => {
     const try_ = (n) => {
-      const req = http.get(`http://127.0.0.1:${port}/`, (res) => {
-        res.resume();
-        resolve();
-      });
+      const req = http.get(`http://127.0.0.1:${port}/`, (res) => { res.resume(); resolve(); });
       req.on('error', () => {
         if (n <= 0) { reject(new Error('Server failed to start')); return; }
         setTimeout(() => try_(n - 1), 250);
@@ -63,11 +86,38 @@ function waitForServer(port, retries = 40) {
   });
 }
 
-// ── Start the Express server in-process ───────────────────────────────────────
+// ── Start the Express server in-process ──────────────────────────────────────
+// Returns true if server started, false if port conflict (conflict UI shown).
 async function startServer() {
-  serverPort = await findPreferredPort();
+  const config        = loadConfig();
+  const preferredPort = config.port || DEFAULT_PORT;
+  const free          = await isPortFree(preferredPort);
 
-  // Set env vars BEFORE importing server.js so its top-level code picks them up
+  if (!free) {
+    // Is it our own app?
+    let isOurApp = false;
+    try {
+      const ping = await httpGetJSON(`http://127.0.0.1:${preferredPort}/api/ping`);
+      isOurApp = ping?.app === 'flux-studio';
+    } catch { /* not reachable or not HTTP */ }
+
+    if (isOurApp) {
+      // Kill the old instance, wait up to 3 s for the port to free
+      console.log(`[Electron] Stopping existing FLUX Studio on port ${preferredPort}…`);
+      await httpPost(`http://127.0.0.1:${preferredPort}/api/quit`);
+      for (let i = 0; i < 12; i++) {
+        await new Promise(r => setTimeout(r, 250));
+        if (await isPortFree(preferredPort)) break;
+      }
+      if (!await isPortFree(preferredPort)) {
+        showPortConflictUI(preferredPort); return false;
+      }
+    } else {
+      showPortConflictUI(preferredPort); return false;
+    }
+  }
+
+  serverPort = preferredPort;
   process.env.PORT     = String(serverPort);
   process.env.DATA_DIR = DATA_DIR;
   process.env.ELECTRON = '1';
@@ -79,15 +129,14 @@ async function startServer() {
   await import(pathToFileURL(serverFile).href);
   await waitForServer(serverPort);
   console.log(`[Electron] Server ready on port ${serverPort}`);
+  return true;
 }
 
 // ── Create the main BrowserWindow ────────────────────────────────────────────
 async function createWindow() {
   mainWindow = new BrowserWindow({
-    width:    1440,
-    height:   900,
-    minWidth: 1024,
-    minHeight: 640,
+    width: 1440, height: 900,
+    minWidth: 1024, minHeight: 640,
     title: APP_NAME,
     icon: path.join(__dirname, '..', 'build', 'icon.png'),
     backgroundColor: '#0d0d18',
@@ -99,98 +148,142 @@ async function createWindow() {
     },
   });
 
-  // Show a loading page immediately while the server boots
   mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(LOADING_HTML)}`);
   mainWindow.once('ready-to-show', () => mainWindow.show());
 
-  // Once server is ready, navigate to the app
   mainWindow.webContents.once('did-finish-load', async () => {
-    await startServer();
-    mainWindow.loadURL(`http://127.0.0.1:${serverPort}/`);
+    const started = await startServer();
+    if (started) mainWindow.loadURL(`http://127.0.0.1:${serverPort}/`);
+    // If !started, showPortConflictUI() already loaded the conflict page
   });
 
-  // Open external links in the system browser, not in Electron
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
   });
 
-  // On macOS, show in dock with a proper name
-  if (process.platform === 'darwin') {
-    app.setName(APP_NAME);
-  }
+  if (process.platform === 'darwin') app.setName(APP_NAME);
 }
 
-// ── Minimal loading page ──────────────────────────────────────────────────────
-const LOADING_HTML = `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body {
-    background: #0d0d18;
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    height: 100vh;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    color: #fff;
-    gap: 20px;
-  }
-  .logo { font-size: 42px; font-weight: 800; letter-spacing: -1px; }
-  .logo span { color: #d4a843; }
-  .sub { font-size: 13px; color: rgba(255,255,255,0.4); }
-  .spinner {
-    width: 28px; height: 28px;
-    border: 3px solid rgba(212,168,67,0.2);
-    border-top-color: #d4a843;
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-    margin-top: 8px;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
-</style>
-</head>
-<body>
-  <div class="logo">FLUX <span>Studio</span></div>
-  <div class="sub">Starting local server…</div>
-  <div class="spinner"></div>
-</body>
-</html>`;
+// ── Show port conflict page (runs before server is up, uses IPC) ──────────────
+function showPortConflictUI(blockedPort) {
+  const html = CONFLICT_HTML
+    .replace(/\{\{PORT\}\}/g, blockedPort)
+    .replace(/\{\{SUGGEST\}\}/g, blockedPort + 1);
+  mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+}
 
-// ── macOS menu (minimal) ──────────────────────────────────────────────────────
+// ── Loading HTML ──────────────────────────────────────────────────────────────
+const LOADING_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d0d18;display:flex;flex-direction:column;align-items:center;
+justify-content:center;height:100vh;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+color:#fff;gap:20px}
+.logo{font-size:42px;font-weight:800;letter-spacing:-1px}
+.logo span{color:#d4a843}
+.sub{font-size:13px;color:rgba(255,255,255,0.4)}
+.spinner{width:28px;height:28px;border:3px solid rgba(212,168,67,0.2);
+border-top-color:#d4a843;border-radius:50%;animation:spin 0.8s linear infinite;margin-top:8px}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style></head><body>
+<div class="logo">FLUX <span>Studio</span></div>
+<div class="sub">Starting local server…</div>
+<div class="spinner"></div>
+</body></html>`;
+
+// ── Port conflict HTML (self-contained, uses window.fluxApp IPC) ──────────────
+const CONFLICT_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d0d18;display:flex;flex-direction:column;align-items:center;
+justify-content:center;height:100vh;
+font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+color:#fff;text-align:center;padding:40px;gap:0}
+.logo{font-size:28px;font-weight:800;letter-spacing:-0.5px;margin-bottom:28px}
+.logo span{color:#d4a843}
+.card{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);
+border-radius:16px;padding:36px 40px;max-width:520px;width:100%}
+h2{font-size:17px;font-weight:700;margin-bottom:12px;color:#f59e0b}
+p{font-size:13px;color:rgba(255,255,255,0.6);line-height:1.7;margin-bottom:18px}
+.why{background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.25);
+border-radius:10px;padding:14px 16px;font-size:12px;color:rgba(255,255,255,0.5);
+line-height:1.65;text-align:left;margin-bottom:24px}
+.why strong{color:#a5b4fc;display:block;margin-bottom:5px;font-size:11px;
+text-transform:uppercase;letter-spacing:.06em}
+label{display:block;font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:8px;text-align:left}
+input[type=number]{width:100%;padding:10px 14px;
+background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);
+border-radius:8px;color:#fff;font-size:15px;outline:none;margin-bottom:14px;
+-moz-appearance:textfield}
+input[type=number]:focus{border-color:#d4a843}
+button{width:100%;padding:12px;background:#d4a843;color:#000;border:none;
+border-radius:8px;font-size:14px;font-weight:700;cursor:pointer}
+button:hover{background:#e8bc55}
+.err{font-size:12px;color:#f87171;margin-top:10px;display:none}
+</style></head><body>
+<div class="logo">FLUX <span>Studio</span></div>
+<div class="card">
+  <h2>⚠ Port {{PORT}} is already in use</h2>
+  <p>Another application (not FLUX Studio) is running on port <strong>{{PORT}}</strong>. Choose a different port to continue.</p>
+  <div class="why">
+    <strong>Why a fixed port matters</strong>
+    FLUX Studio saves your API key and generation history using your browser's local storage, which is tied to the app's network port. If the port changes between launches, the app treats it as a fresh session — your API key and history appear gone. Pick a port you'll keep permanently.
+  </div>
+  <label for="pi">Port number (1024 – 65535)</label>
+  <input type="number" id="pi" value="{{SUGGEST}}" min="1024" max="65535">
+  <button onclick="save()">Use This Port &amp; Launch</button>
+  <div class="err" id="err">Port must be between 1024 and 65535.</div>
+</div>
+<script>
+function save(){
+  const p=parseInt(document.getElementById('pi').value,10);
+  if(!p||p<1024||p>65535){document.getElementById('err').style.display='block';return;}
+  if(window.fluxApp) window.fluxApp.savePortAndRestart(p);
+}
+document.getElementById('pi').addEventListener('keydown',e=>{if(e.key==='Enter')save();});
+</script>
+</body></html>`;
+
+// ── IPC handlers ──────────────────────────────────────────────────────────────
+ipcMain.handle('flux:get-config', () => loadConfig());
+
+ipcMain.handle('flux:save-port-restart', (_, port) => {
+  const config = loadConfig();
+  config.port  = parseInt(port, 10) || DEFAULT_PORT;
+  saveConfig(config);
+  app.relaunch();
+  app.exit(0);
+});
+
+ipcMain.handle('flux:restart', () => {
+  app.relaunch();
+  app.exit(0);
+});
+
+// ── macOS menu ────────────────────────────────────────────────────────────────
 function buildMenu() {
   const template = [
     {
       label: APP_NAME,
       submenu: [
-        { role: 'about' },
-        { type: 'separator' },
-        { role: 'services' },
-        { type: 'separator' },
-        { role: 'hide' },
-        { role: 'hideOthers' },
-        { role: 'unhide' },
-        { type: 'separator' },
-        { role: 'quit' },
+        { role: 'about' }, { type: 'separator' },
+        { role: 'services' }, { type: 'separator' },
+        { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' },
+        { type: 'separator' }, { role: 'quit' },
       ],
     },
     {
       label: 'Edit',
       submenu: [
         { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
-        { role: 'cut' }, { role: 'copy' }, { role: 'paste' },
-        { role: 'selectAll' },
+        { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
       ],
     },
     {
       label: 'View',
       submenu: [
-        { role: 'reload' },
-        { type: 'separator' },
+        { role: 'reload' }, { type: 'separator' },
         { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' },
-        { type: 'separator' },
-        { role: 'togglefullscreen' },
+        { type: 'separator' }, { role: 'togglefullscreen' },
         ...(IS_DEV ? [{ type: 'separator' }, { role: 'toggleDevTools' }] : []),
       ],
     },
@@ -202,32 +295,17 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-// ── Single-instance lock ──────────────────────────────────────────────────────
-// Prevents a second copy from fighting over port 4242.
-// If a second launch is attempted, it quits immediately and the first instance
-// is brought to the front instead.
-const gotTheLock = app.requestSingleInstanceLock();
-if (!gotTheLock) {
-  app.quit();
-} else {
-  app.on('second-instance', () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-    }
-  });
+// ── App lifecycle ─────────────────────────────────────────────────────────────
+app.whenReady().then(() => {
+  buildMenu();
+  createWindow();
+});
 
-  // ── App lifecycle ───────────────────────────────────────────────────────────
-  app.whenReady().then(() => {
-    buildMenu();
-    createWindow();
-  });
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
 
-  app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') app.quit();
-  });
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) createWindow();
+});
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
-}

@@ -636,41 +636,64 @@ async function loadCredits() {
   } catch { document.getElementById('credit-val').textContent = '—'; }
 }
 
-// ── Session cost tracker ──────────────────────────────────────────────────────
-let _sessionCredits = 0;   // accumulated this session
+// ── Session + All-Time cost tracker ───────────────────────────────────────────
+let _sessionCredits  = 0;   // accumulated today
+let _allTimeCredits  = 0;   // accumulated all time (from full history)
 
 function addSessionCost(credits) {
   if (!credits || isNaN(credits)) return;
-  _sessionCredits += Number(credits);
+  const n = Number(credits);
+  _sessionCredits += n;
+  _allTimeCredits += n;
   _renderSessionBadge();
+  _renderAllTimeBadge();
 }
 
 function _renderSessionBadge() {
   const badge = document.getElementById('session-badge');
   const span  = document.getElementById('session-spend');
   if (!span) return;
-  const cr  = _sessionCredits.toFixed(4).replace(/\.?0+$/, '');  // trim trailing zeros
+  const cr  = _sessionCredits.toFixed(4).replace(/\.?0+$/, '');
   const usd = (_sessionCredits * 0.01).toFixed(4).replace(/\.?0+$/, '');
   span.textContent = `${cr} cr · $${usd}`;
-  // Bump animation
   badge.classList.remove('bump');
   requestAnimationFrame(() => { badge.classList.add('bump'); });
 }
 
-// Seed session total from today's history entries on page load
+function _renderAllTimeBadge() {
+  const span = document.getElementById('alltime-spend');
+  if (!span) return;
+  const cr  = _allTimeCredits.toFixed(4).replace(/\.?0+$/, '');
+  const usd = (_allTimeCredits * 0.01).toFixed(2);
+  span.textContent = `${cr} cr · $${usd}`;
+}
+
+// Seed both today and all-time totals from full history on page load
 async function seedSessionCostFromHistory() {
   try {
     const hist = await apiGet('/api/history');
     const todayPrefix = new Date().toISOString().slice(0, 10);  // "YYYY-MM-DD"
-    const todayTotal = hist
-      .filter(e => e.timestamp?.startsWith(todayPrefix) && e.cost != null)
-      .reduce((s, e) => s + Number(e.cost), 0);
+
+    let todayTotal   = 0;
+    let allTimeTotal = 0;
+    for (const e of hist) {
+      if (e.cost == null) continue;
+      const c = Number(e.cost);
+      allTimeTotal += c;
+      if (e.timestamp?.startsWith(todayPrefix)) todayTotal += c;
+    }
+
+    if (allTimeTotal > 0) {
+      _allTimeCredits = allTimeTotal;
+      _renderAllTimeBadge();
+    }
     if (todayTotal > 0) {
       _sessionCredits = todayTotal;
       _renderSessionBadge();
     }
   } catch { /* silent */ }
 }
+
 
 
 
@@ -1451,7 +1474,14 @@ function renderHistory() {
       });
     }
 
+    // Highlight card if it's selected for comparison
+    if (_compareMode) {
+      if (_abA && _abA.id === entry.id) card.classList.add('hist-compare-a');
+      if (_abB && _abB.id === entry.id) card.classList.add('hist-compare-b');
+    }
+
     cardImg.addEventListener('click', () => {
+      if (_compareMode) { selectForCompare(entry); return; }
       if (refPreview) entry._refPreviewUrl = refPreview;
       openLightbox(entry);
     });
@@ -1570,7 +1600,11 @@ document.addEventListener('keydown', e => {
   const pm = document.getElementById('painter-modal');
 
   if (e.key === 'Escape') {
+    const sm = document.getElementById('settings-modal');
+    const cm = document.getElementById('compare-modal');
     if (!sc.classList.contains('hidden'))  { closeShortcuts(); return; }
+    if (!sm.classList.contains('hidden'))  { closeSettings();  return; }
+    if (!cm.classList.contains('hidden'))  { cm.classList.add('hidden'); return; }
     if (!lb.classList.contains('hidden'))  { lb.classList.add('hidden'); return; }
     if (!pm.classList.contains('hidden'))  { pm.classList.add('hidden'); return; }
   }
@@ -1678,3 +1712,129 @@ window.addEventListener('paste', async (e) => {
 });
 
 
+// ─── A/B Compare mode ────────────────────────────────────────────────────────
+let _compareMode = false;
+let _abA = null;  // entry selected as A
+let _abB = null;  // entry selected as B
+
+document.getElementById('hist-compare-btn').addEventListener('click', () => {
+  _compareMode = !_compareMode;
+  _abA = null;
+  _abB = null;
+  document.getElementById('hist-compare-btn').classList.toggle('active', _compareMode);
+  document.getElementById('history-grid').classList.toggle('compare-mode', _compareMode);
+  renderHistory();
+  if (_compareMode) toast('⚖ Click two images to compare them side-by-side', 'info', 3000);
+});
+
+function selectForCompare(entry) {
+  // Clicking the same card twice deselects it
+  if (_abA && _abA.id === entry.id) { _abA = null; renderHistory(); return; }
+  if (_abB && _abB.id === entry.id) { _abB = null; renderHistory(); return; }
+
+  if (!_abA) {
+    _abA = entry;
+    renderHistory();
+    toast('A selected — now click a second image for B', 'info', 2500);
+  } else if (!_abB) {
+    _abB = entry;
+    renderHistory();
+    openCompareModal(_abA, _abB);
+  }
+}
+
+function openCompareModal(a, b) {
+  const fmt = (e) => [
+    e.model, e.output_format,
+    e.width && `${e.width}×${e.height}`,
+    e.seed  && `seed:${e.seed}`,
+    e.cost  && `${e.cost}cr`,
+    e.timestamp && new Date(e.timestamp).toLocaleString(undefined, { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }),
+  ].filter(Boolean).join(' · ');
+
+  document.getElementById('compare-img-a').src = a.image_url;
+  document.getElementById('compare-img-b').src = b.image_url;
+  document.getElementById('compare-meta-a').innerHTML =
+    `<strong>${a.prompt || '(no prompt)'}</strong><br>${fmt(a)}`;
+  document.getElementById('compare-meta-b').innerHTML =
+    `<strong>${b.prompt || '(no prompt)'}</strong><br>${fmt(b)}`;
+  document.getElementById('compare-modal').classList.remove('hidden');
+}
+
+document.getElementById('compare-close').addEventListener('click', () => {
+  document.getElementById('compare-modal').classList.add('hidden');
+});
+document.getElementById('compare-modal').addEventListener('click', e => {
+  if (e.target === document.getElementById('compare-modal'))
+    document.getElementById('compare-modal').classList.add('hidden');
+});
+document.getElementById('compare-swap').addEventListener('click', () => {
+  const tmp = _abA; _abA = _abB; _abB = tmp;
+  renderHistory();
+  openCompareModal(_abA, _abB);
+});
+
+
+// ─── Settings Modal ───────────────────────────────────────────────────────────
+async function openSettings() {
+  const modal = document.getElementById('settings-modal');
+  const portInput = document.getElementById('settings-port');
+  const portCurrent = document.getElementById('settings-port-current');
+  const status = document.getElementById('settings-status');
+
+  // Load current config
+  try {
+    const cfg = await apiGet('/api/config');
+    portInput.value = cfg.port || 4242;
+    portCurrent.textContent = `Current: ${cfg.port || 4242}`;
+  } catch {
+    portInput.value = 4242;
+    portCurrent.textContent = '';
+  }
+  status.textContent = '';
+  modal.classList.remove('hidden');
+}
+
+function closeSettings() {
+  document.getElementById('settings-modal').classList.add('hidden');
+}
+
+async function saveSettings() {
+  const portInput = document.getElementById('settings-port');
+  const status    = document.getElementById('settings-status');
+  const port = parseInt(portInput.value, 10);
+
+  if (!port || port < 1024 || port > 65535) {
+    status.textContent = '⚠ Port must be between 1024 and 65535';
+    status.style.color = '#f87171';
+    return;
+  }
+
+  try {
+    status.textContent = 'Saving…';
+    status.style.color = 'var(--text-muted)';
+    await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ port }),
+    });
+    status.textContent = 'Restarting…';
+    // Trigger restart via Electron IPC if available
+    if (window.fluxApp?.restart) {
+      setTimeout(() => window.fluxApp.restart(), 400);
+    } else {
+      status.textContent = 'Saved. Restart the app to apply the new port.';
+    }
+  } catch (e) {
+    status.textContent = `Error: ${e.message}`;
+    status.style.color = '#f87171';
+  }
+}
+
+document.getElementById('btn-settings').addEventListener('click', openSettings);
+document.getElementById('settings-close').addEventListener('click', closeSettings);
+document.getElementById('settings-close-2').addEventListener('click', closeSettings);
+document.getElementById('settings-save').addEventListener('click', saveSettings);
+document.getElementById('settings-modal').addEventListener('click', e => {
+  if (e.target === document.getElementById('settings-modal')) closeSettings();
+});
