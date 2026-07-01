@@ -267,7 +267,7 @@ body {
   flex-shrink: 0;
 }
 .settings-title { font-size: 15px; font-weight: 700; letter-spacing: -0.02em; }
-.settings-body { padding: 20px; }
+.settings-body { padding: 20px; overflow-y: auto; max-height: 70vh; }
 .settings-section { margin-bottom: 20px; }
 .settings-section-title {
   font-size: 11px;
@@ -313,6 +313,25 @@ body {
   padding: 14px 20px;
   border-top: 1px solid var(--border);
   flex-shrink: 0;
+}
+.settings-path-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.settings-path-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-label); margin-bottom: 3px; }
+.settings-path-val {
+  font-family: 'SFMono-Regular', 'Consolas', monospace;
+  font-size: 10px;
+  color: #a5b4fc;
+  word-break: break-all;
+  background: none;
+  padding: 0;
+  display: block;
 }
 
 /* ─── Welcome Modal ──────────────────────────────────────────────────────── */

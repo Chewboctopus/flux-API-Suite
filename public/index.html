@@ -701,6 +701,18 @@
     <div class="settings-body">
 
       <div class="settings-section">
+        <div class="settings-section-title">API Key</div>
+        <label class="settings-label" for="settings-apikey">BFL API Key</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="password" id="settings-apikey" class="settings-input" placeholder="bfl-xxxxxxxxxxxxxxxxxxxx" autocomplete="off" spellcheck="false" style="flex:1">
+          <button class="btn btn-secondary btn-sm" id="settings-apikey-reveal" title="Show/hide key">👁</button>
+        </div>
+        <div style="margin-top:8px;display:flex;gap:8px">
+          <button class="btn btn-primary btn-sm" id="settings-apikey-save" style="flex:1">Save Key</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
         <div class="settings-section-title">Network Port</div>
         <div class="settings-port-info">
           <strong>Why this matters:</strong> FLUX Studio saves your API key and generation history in your
@@ -713,6 +725,42 @@
           <input type="number" id="settings-port" class="settings-input" min="1024" max="65535" placeholder="4242">
           <span id="settings-port-current" style="font-size:12px;color:var(--text-muted);white-space:nowrap"></span>
         </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-section-title">Storage</div>
+        <div id="settings-paths" style="display:flex;flex-direction:column;gap:10px;margin-bottom:12px">
+          <div class="settings-path-row">
+            <span>🖼</span>
+            <div style="flex:1;min-width:0">
+              <div class="settings-path-label">Generated images</div>
+              <code class="settings-path-val" id="sp-outputs">…</code>
+            </div>
+            <button class="btn btn-secondary btn-sm" data-reveal="outputs" title="Show in Finder">↗</button>
+          </div>
+          <div class="settings-path-row">
+            <span>📤</span>
+            <div style="flex:1;min-width:0">
+              <div class="settings-path-label">Uploaded inputs</div>
+              <code class="settings-path-val" id="sp-uploads">…</code>
+            </div>
+            <button class="btn btn-secondary btn-sm" data-reveal="uploads" title="Show in Finder">↗</button>
+          </div>
+          <div class="settings-path-row">
+            <span>📋</span>
+            <div style="flex:1;min-width:0">
+              <div class="settings-path-label">History &amp; config</div>
+              <code class="settings-path-val" id="sp-data">…</code>
+            </div>
+            <button class="btn btn-secondary btn-sm" data-reveal="data" title="Show in Finder">↗</button>
+          </div>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="settings-change-folder" style="width:100%;justify-content:center">
+          📁 Change Data Folder…
+        </button>
+        <p style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.5">
+          Moving the data folder requires restarting the app. Your existing files will not be moved automatically — copy them manually.
+        </p>
       </div>
 
       <div class="settings-section" style="margin-bottom:0">

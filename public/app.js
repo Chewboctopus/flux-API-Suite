@@ -1800,21 +1800,43 @@ document.getElementById('compare-swap').addEventListener('click', () => {
 
 
 // ─── Settings Modal ───────────────────────────────────────────────────────────
-async function openSettings() {
-  const modal = document.getElementById('settings-modal');
-  const portInput = document.getElementById('settings-port');
-  const portCurrent = document.getElementById('settings-port-current');
-  const status = document.getElementById('settings-status');
+// Cache paths when settings open so reveal buttons can use them
+let _settingsPaths = {};
 
-  // Load current config
+async function openSettings() {
+  const modal      = document.getElementById('settings-modal');
+  const portInput  = document.getElementById('settings-port');
+  const portCurrent = document.getElementById('settings-port-current');
+  const status     = document.getElementById('settings-status');
+  const keyInput   = document.getElementById('settings-apikey');
+
+  // Populate API key field
+  keyInput.value = localStorage.getItem('flux_api_key') || '';
+  keyInput.type  = 'password';
+  document.getElementById('settings-apikey-reveal').textContent = '👁';
+
+  // Load current port config
   try {
     const cfg = await apiGet('/api/config');
-    portInput.value = cfg.port || 4242;
+    portInput.value       = cfg.port || 4242;
     portCurrent.textContent = `Current: ${cfg.port || 4242}`;
   } catch {
     portInput.value = 4242;
     portCurrent.textContent = '';
   }
+
+  // Load storage paths
+  try {
+    _settingsPaths = await apiGet('/api/paths');
+    document.getElementById('sp-outputs').textContent = _settingsPaths.outputs || '…';
+    document.getElementById('sp-uploads').textContent = _settingsPaths.uploads || '…';
+    document.getElementById('sp-data').textContent    = _settingsPaths.data    || '…';
+  } catch {
+    document.getElementById('sp-outputs').textContent = '—';
+    document.getElementById('sp-uploads').textContent = '—';
+    document.getElementById('sp-data').textContent    = '—';
+  }
+
   status.textContent = '';
   modal.classList.remove('hidden');
 }
@@ -1843,7 +1865,6 @@ async function saveSettings() {
       body: JSON.stringify({ port }),
     });
     status.textContent = 'Restarting…';
-    // Trigger restart via Electron IPC if available
     if (window.fluxApp?.restart) {
       setTimeout(() => window.fluxApp.restart(), 400);
     } else {
@@ -1854,6 +1875,56 @@ async function saveSettings() {
     status.style.color = '#f87171';
   }
 }
+
+// API key save
+document.getElementById('settings-apikey-save').addEventListener('click', () => {
+  const keyInput = document.getElementById('settings-apikey');
+  const key = keyInput.value.trim();
+  if (!key) {
+    toast('Enter a valid API key', 'warn'); return;
+  }
+  API_KEY = key;
+  localStorage.setItem('flux_api_key', key);
+  loadCredits();
+  toast('✓ API key updated', 'success');
+  // Make sure we're on the app screen
+  document.getElementById('screen-apikey').classList.remove('active');
+  document.getElementById('screen-app').classList.add('active');
+});
+
+// API key reveal toggle
+document.getElementById('settings-apikey-reveal').addEventListener('click', () => {
+  const inp = document.getElementById('settings-apikey');
+  const btn = document.getElementById('settings-apikey-reveal');
+  if (inp.type === 'password') { inp.type = 'text'; btn.textContent = '🙈'; }
+  else                         { inp.type = 'password'; btn.textContent = '👁'; }
+});
+
+// Reveal in Finder buttons
+document.querySelectorAll('[data-reveal]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const which = btn.dataset.reveal;
+    const folder = _settingsPaths[which === 'outputs' ? 'outputs'
+                                 : which === 'uploads' ? 'uploads'
+                                 : 'data'];
+    if (!folder) { toast('Path not available', 'warn'); return; }
+    if (window.fluxApp?.revealInFinder) window.fluxApp.revealInFinder(folder);
+    else toast('Reveal in Finder is only available in the desktop app', 'info');
+  });
+});
+
+// Change data folder
+document.getElementById('settings-change-folder').addEventListener('click', async () => {
+  if (!window.fluxApp?.pickFolder) {
+    toast('Folder picker is only available in the desktop app', 'info'); return;
+  }
+  const chosen = await window.fluxApp.pickFolder();
+  if (!chosen) return;
+  const status = document.getElementById('settings-status');
+  status.textContent = `Saving… will restart`;
+  status.style.color = 'var(--text-muted)';
+  await window.fluxApp.saveDataDir(chosen);
+});
 
 document.getElementById('btn-settings').addEventListener('click', openSettings);
 document.getElementById('settings-close').addEventListener('click', closeSettings);

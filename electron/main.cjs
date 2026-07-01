@@ -4,7 +4,7 @@
 // process regardless of the project's "type": "module" setting.
 // The Express server (server.js) is an ES module loaded via dynamic import().
 
-const { app, BrowserWindow, shell, Menu, ipcMain } = require('electron');
+const { app, BrowserWindow, shell, Menu, ipcMain, dialog } = require('electron');
 const path   = require('path');
 const http   = require('http');
 const net    = require('net');
@@ -16,9 +16,10 @@ const IS_DEV       = !app.isPackaged;
 const APP_NAME     = 'FLUX Studio';
 const DEFAULT_PORT = 4242;
 
-// Data lives in ~/Documents/FLUX Studio/ — easy for users to find outputs
-const DATA_DIR    = path.join(app.getPath('documents'), 'FLUX Studio', 'data');
-const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
+// Data lives in ~/Documents/FLUX Studio/ by default; configurable via config.json
+const DEFAULT_DATA_DIR = path.join(app.getPath('documents'), 'FLUX Studio', 'data');
+// Config file always lives in the default location so we can bootstrap it
+const CONFIG_FILE = path.join(DEFAULT_DATA_DIR, 'config.json');
 
 let mainWindow = null;
 let serverPort = null;
@@ -34,6 +35,12 @@ function saveConfig(data) {
     fs.mkdirSync(path.dirname(CONFIG_FILE), { recursive: true });
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(data, null, 2));
   } catch (e) { console.error('Config save failed:', e.message); }
+}
+
+// Resolve the effective DATA_DIR (default or user-configured)
+function getDataDir() {
+  const config = loadConfig();
+  return config.dataDir || DEFAULT_DATA_DIR;
 }
 
 // ── Port helpers ──────────────────────────────────────────────────────────────
@@ -119,7 +126,7 @@ async function startServer() {
 
   serverPort = preferredPort;
   process.env.PORT     = String(serverPort);
-  process.env.DATA_DIR = DATA_DIR;
+  process.env.DATA_DIR = getDataDir();
   process.env.ELECTRON = '1';
 
   const serverFile = IS_DEV
@@ -257,6 +264,27 @@ ipcMain.handle('flux:save-port-restart', (_, port) => {
 ipcMain.handle('flux:restart', () => {
   app.relaunch();
   app.exit(0);
+});
+
+ipcMain.handle('flux:pick-folder', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Choose FLUX Studio Data Folder',
+    properties: ['openDirectory', 'createDirectory'],
+    buttonLabel: 'Use This Folder',
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
+
+ipcMain.handle('flux:save-data-dir', (_, dataDir) => {
+  const config = loadConfig();
+  config.dataDir = dataDir;
+  saveConfig(config);
+  app.relaunch();
+  app.exit(0);
+});
+
+ipcMain.handle('flux:reveal-in-finder', (_, folderPath) => {
+  shell.showItemInFolder(folderPath);
 });
 
 // ── macOS menu ────────────────────────────────────────────────────────────────
