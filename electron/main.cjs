@@ -202,16 +202,32 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-// ── App lifecycle ─────────────────────────────────────────────────────────────
-app.whenReady().then(() => {
-  buildMenu();
-  createWindow();
-});
+// ── Single-instance lock ──────────────────────────────────────────────────────
+// Prevents a second copy from fighting over port 4242.
+// If a second launch is attempted, it quits immediately and the first instance
+// is brought to the front instead.
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
+  // ── App lifecycle ───────────────────────────────────────────────────────────
+  app.whenReady().then(() => {
+    buildMenu();
+    createWindow();
+  });
 
-app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
-});
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit();
+  });
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+}

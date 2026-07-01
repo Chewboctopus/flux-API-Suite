@@ -162,7 +162,90 @@ body {
   40%  { transform: scale(1.08); }
   100% { transform: scale(1); }
 }
+.alltime-badge { border-color: rgba(167,139,250,.35); }
+.alltime-badge .cval-alltime { color: #a78bfa; }  /* violet */
 
+/* ─── A/B Compare Modal ──────────────────────────────────────────────────── */
+.compare-inner {
+  background: var(--bg-surface);
+  border-radius: 14px;
+  width: 95vw;
+  max-width: 1400px;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+}
+.compare-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.compare-title { font-size: 15px; font-weight: 700; letter-spacing: -0.02em; }
+.compare-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+.compare-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  min-width: 0;
+}
+.compare-panel img {
+  flex: 1;
+  width: 100%;
+  object-fit: contain;
+  min-height: 0;
+  background: #000;
+  display: block;
+}
+.compare-panel-meta {
+  padding: 10px 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  background: var(--bg-surface);
+  flex-shrink: 0;
+  line-height: 1.6;
+}
+.compare-panel-meta strong { color: var(--text-primary); }
+.compare-ab-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  font-size: 12px;
+  font-weight: 800;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+}
+.badge-a { background: #3b82f6; color: #fff; }
+.badge-b { background: #f59e0b; color: #000; }
+.compare-divider { width: 1px; background: var(--border); flex-shrink: 0; }
+
+/* Compare mode — card selection in gallery */
+.history-grid.compare-mode .history-card { cursor: crosshair; }
+.history-card.hist-compare-a { outline: 3px solid #3b82f6; outline-offset: -3px; }
+.history-card.hist-compare-b { outline: 3px solid #f59e0b; outline-offset: -3px; }
+#hist-compare-btn.active {
+  background: rgba(99,102,241,0.18);
+  border-color: rgba(99,102,241,0.5);
+  color: #a5b4fc;
+}
 
 /* ─── App Layout ─────────────────────────────────────────────────────────── */
 .app-main { flex: 1; display: flex; overflow: hidden; }
