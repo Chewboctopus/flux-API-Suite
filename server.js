@@ -210,6 +210,7 @@ app.post('/api/generate', async (req, res) => {
       seed: result.result?.seed ?? (seed || null), cost: cost ?? null,
       output_format, local_file: localFile,
       image_url: finalImageUrl(localFile, imageUrl),
+      ref_urls: ref_urls.filter(Boolean),
       timestamp: new Date().toISOString(),
     };
     appendHistory(entry);
@@ -254,6 +255,7 @@ app.post('/api/inpaint', async (req, res) => {
     const entry = {
       id: genId, tool: 'inpaint', model: 'flux-pro-1.0-fill', prompt,
       seed: result.result?.seed ?? (seed || null), cost, output_format,
+      input_url: imgUrl || null,
       local_file: localFile, image_url: finalImageUrl(localFile, imageUrl),
       timestamp: new Date().toISOString(),
     };
@@ -294,6 +296,7 @@ app.post('/api/erase', async (req, res) => {
     const entry = {
       id: genId, tool: 'erase', model: 'flux-tools/erase-v1',
       seed: result.result?.seed ?? (seed || null), cost, output_format,
+      input_url: imgUrl || null,
       local_file: localFile, image_url: finalImageUrl(localFile, imageUrl),
       timestamp: new Date().toISOString(),
     };
@@ -338,7 +341,9 @@ app.post('/api/outpaint', async (req, res) => {
     const localFile = await saveOutput(imageUrl, genId, output_format);
     const entry = {
       id: genId, tool: 'outpaint', model: 'flux-tools/outpainting-v1',
-      cost, output_format, local_file: localFile,
+      cost, output_format,
+      input_url: imgUrl || null,
+      local_file: localFile,
       image_url: finalImageUrl(localFile, imageUrl),
       timestamp: new Date().toISOString(),
     };
@@ -379,6 +384,8 @@ app.post('/api/vto', async (req, res) => {
     const entry = {
       id: genId, tool: 'vto', model: 'flux-tools/vto-v1', prompt,
       seed: result.result?.seed ?? (seed || null), cost, output_format,
+      input_url: person_url || null,
+      garment_url: garment_url || null,
       local_file: localFile, image_url: finalImageUrl(localFile, imageUrl),
       timestamp: new Date().toISOString(),
     };
@@ -408,7 +415,9 @@ app.post('/api/deblur', async (req, res) => {
     const localFile = await saveOutput(imageUrl, genId, output_format);
     const entry = {
       id: genId, tool: 'deblur', model: 'flux-tools/deblur-v1',
-      cost, output_format, local_file: localFile,
+      cost, output_format,
+      input_url: imgUrl || null,
+      local_file: localFile,
       image_url: finalImageUrl(localFile, imageUrl),
       timestamp: new Date().toISOString(),
     };

@@ -574,21 +574,35 @@ function reloadEntrySettings(e) {
     if (e.height) set('gen-height', e.height);
     if (e.seed)   set('gen-seed', e.seed);
     if (e.output_format) set('gen-format', e.output_format);
+    // Reload reference images
+    if (e.ref_urls?.length) {
+      const slots = Array.from(document.querySelectorAll('#gen-refs-grid .ref-slot'));
+      e.ref_urls.forEach((url, i) => {
+        if (slots[i]?.setFromUrl) setTimeout(() => slots[i].setFromUrl(url), 150 + i * 80);
+      });
+    }
   } else if (e.tool === 'inpaint') {
     if (e.prompt) set('inpaint-prompt', e.prompt);
     if (e.steps)  set('inpaint-steps', e.steps);
     if (e.guidance) set('inpaint-guidance', e.guidance);
     if (e.seed)   set('inpaint-seed', e.seed);
     if (e.output_format) set('inpaint-format', e.output_format);
+    if (e.input_url) setTimeout(() => inpaintUZ.setFromUrl(e.input_url), 150);
   } else if (e.tool === 'erase') {
     if (e.output_format) set('erase-format', e.output_format);
+    if (e.input_url) setTimeout(() => eraseUZ.setFromUrl(e.input_url), 150);
   } else if (e.tool === 'outpaint') {
     if (e.output_format) set('op-format', e.output_format);
     if (e.width)  set('op-width', e.width);
     if (e.height) set('op-height', e.height);
+    if (e.input_url) setTimeout(() => outpaintUZ.setFromUrl(e.input_url), 150);
+  } else if (e.tool === 'vto') {
+    if (e.input_url)   setTimeout(() => vtoPersonUZ.setFromUrl(e.input_url),   150);
+    if (e.garment_url) setTimeout(() => vtoGarmentUZ.setFromUrl(e.garment_url), 150);
   } else if (e.tool === 'deblur') {
     if (e.prompt) set('deblur-prompt', e.prompt);
     if (e.output_format) set('deblur-format', e.output_format);
+    if (e.input_url) setTimeout(() => deblurUZ.setFromUrl(e.input_url), 150);
   }
   toast(`↺ Settings restored to ${e.tool} tab`, 'info');
 }
@@ -915,9 +929,20 @@ function createRefSlot(i) {
     if (refPopup) { refPopup.remove(); refPopup = null; }
   });
 
-  // Public handle for paste
+  // Public handles
   slot._handleFile = handleFile;
   slot._state = state;
+
+  // setFromUrl: restore a server-side URL (e.g. /uploads/uuid.jpg) into this slot
+  slot.setFromUrl = function(serverUrl) {
+    if (!serverUrl) return;
+    img.src = serverUrl;
+    img.style.display = 'block';
+    clearBtn.style.display = 'block';
+    badge.style.display = 'block';
+    slot.classList.add('has-image');
+    state.url = serverUrl;
+  };
 
   refsGrid.appendChild(slot);
 }
@@ -1423,10 +1448,8 @@ function renderHistory() {
   empty.classList.add('hidden');
 
   items.forEach(entry => {
-    // Grab current ref slot 1 image as A/B comparison target (if loaded)
-    const refSlot0   = document.querySelector('.refs-grid .ref-slot');
-    const refImg0    = refSlot0?.querySelector('img');
-    const refPreview = (refImg0?.src && GEN_REFS[0]?.url) ? refImg0.src : null;
+    // A/B compare source: use the entry's stored input_url or first ref_url
+    const refPreview = entry.input_url || entry.ref_urls?.[0] || null;
 
     const card = document.createElement('div');
     card.className = 'history-card';
