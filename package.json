@@ -27,6 +27,9 @@
     "copyright":   "Black Forest Labs",
     "icon":        "build/icon.png",
     "asar":        false,
+    "publish": {
+      "provider": "github"
+    },
     "directories": {
       "output":    "dist",
       "buildResources": "build"
