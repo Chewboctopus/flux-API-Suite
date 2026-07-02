@@ -9,8 +9,8 @@ permissions:
   contents: write
 
 jobs:
-  build-mac:
-    name: macOS (DMG)
+  build-mac-arm64:
+    name: macOS arm64 (Apple Silicon DMG)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,8 +19,23 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Build macOS DMG
-        run: npm run electron:build:mac -- --publish always
+      - name: Build macOS arm64 DMG
+        run: npm run electron:build:mac -- --publish always --arch arm64
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-mac-x64:
+    name: macOS x64 (Intel DMG)
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Build macOS x64 DMG
+        run: npm run electron:build:mac -- --publish always --arch x64
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
