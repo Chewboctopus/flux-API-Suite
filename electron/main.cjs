@@ -82,7 +82,7 @@ function httpPost(url) {
 function waitForServer(port, retries = 40) {
   return new Promise((resolve, reject) => {
     const try_ = (n) => {
-      const req = http.get(`http://127.0.0.1:${port}/`, (res) => { res.resume(); resolve(); });
+      const req = http.get(`http://127.0.0.1:${port}/api/ping`, (res) => { res.resume(); resolve(); });
       req.on('error', () => {
         if (n <= 0) { reject(new Error('Server failed to start')); return; }
         setTimeout(() => try_(n - 1), 250);
@@ -92,6 +92,7 @@ function waitForServer(port, retries = 40) {
     try_(retries);
   });
 }
+
 
 // ── Start the Express server in-process ──────────────────────────────────────
 // Returns true if server started, false if port conflict (conflict UI shown).
@@ -165,9 +166,13 @@ async function createWindow() {
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    // Only open http/https URLs externally — never file:// or javascript:
+    if (url.startsWith('https://') || url.startsWith('http://')) {
+      shell.openExternal(url);
+    }
     return { action: 'deny' };
   });
+
 
   if (process.platform === 'darwin') app.setName(APP_NAME);
 }

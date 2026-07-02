@@ -50,13 +50,28 @@ function fileToB64(filePath) {
   return readFileSync(filePath).toString('base64');
 }
 
-function resolveUploadPath(urlPath) {
-  // /uploads/uuid.jpg → absolute path
-  return join(UPLOADS_DIR, urlPath.replace(/^\/uploads\//, ''));
-}
 
-function getB64(pathOrUrl, b64) {
-  if (pathOrUrl) return fileToB64(resolveUploadPath(pathOrUrl));
+
+async function getB64(pathOrUrl, b64) {
+  if (pathOrUrl) {
+    if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) {
+      // External URL — fetch and convert to base64
+      const r = await fetch(pathOrUrl);
+      if (!r.ok) return null;
+      return Buffer.from(await r.arrayBuffer()).toString('base64');
+    }
+    // Local path — resolve to absolute file path
+    let absPath;
+    if (pathOrUrl.startsWith('/uploads/') || pathOrUrl.includes('/uploads/')) {
+      absPath = join(UPLOADS_DIR, pathOrUrl.replace(/^.*\/uploads\//, ''));
+    } else if (pathOrUrl.startsWith('/outputs/') || pathOrUrl.includes('/outputs/')) {
+      absPath = join(OUTPUTS_DIR, pathOrUrl.replace(/^.*\/outputs\//, ''));
+    } else {
+      // Unknown path format — try uploads first, then outputs
+      absPath = join(UPLOADS_DIR, pathOrUrl.replace(/^\//, ''));
+    }
+    return fileToB64(absPath);
+  }
   if (b64) return stripDataUri(b64);
   return null;
 }
@@ -80,7 +95,11 @@ async function bflPoll(pollingUrl, apiKey, maxTries = 180) {
   for (let i = 0; i < maxTries; i++) {
     await new Promise(r => setTimeout(r, 1000));
     const res = await fetch(pollingUrl, { headers: { Accept: 'application/json', 'x-key': apiKey } });
-    if (!res.ok) continue;
+    // Permanent auth/permission errors — stop immediately
+    if (res.status === 401 || res.status === 403) {
+      const err = new Error(`Auth error from BFL (${res.status})`); err.status = res.status; throw err;
+    }
+    if (!res.ok) continue; // transient 5xx / 429 — keep polling
     const data = await res.json();
     if (data.status === 'Ready') return data;
     if (data.status === 'Error' || data.status === 'Failed') {
@@ -130,15 +149,31 @@ function appendCsv(entry) {
   } catch (e) { console.error('CSV write failed:', e.message); }
 }
 
+// ─── In-memory history cache (avoid blocking re-read on every generation) ──────
+let _historyCache = null;
+
+function loadHistoryCache() {
+  if (_historyCache) return _historyCache;
+  try { _historyCache = JSON.parse(readFileSync(HISTORY_FILE, 'utf8')); }
+  catch { _historyCache = []; }
+  return _historyCache;
+}
+
 function appendHistory(entry) {
   try {
-    const h = JSON.parse(readFileSync(HISTORY_FILE, 'utf8'));
+    const h = loadHistoryCache();
     h.unshift(entry);
     if (h.length > 10000) h.splice(10000);
-    writeFileSync(HISTORY_FILE, JSON.stringify(h, null, 2));
+    // Write asynchronously to avoid blocking the event loop
+    import('fs').then(({ promises: fsp }) =>
+      fsp.writeFile(HISTORY_FILE, JSON.stringify(h, null, 2)).catch(e =>
+        console.error('History write failed:', e.message)
+      )
+    );
     appendCsv(entry);
-  } catch (e) { console.error('History write failed:', e.message); }
+  } catch (e) { console.error('History append failed:', e.message); }
 }
+
 
 function makeId(prefix) {
   return `${prefix}_${Date.now().toString(36)}_${randomUUID().slice(0, 6)}`;
@@ -193,8 +228,14 @@ app.post('/api/generate', async (req, res) => {
   if (prompt_upsampling != null) payload.prompt_upsampling = Boolean(prompt_upsampling);
   if (webhook_url) { payload.webhook_url = webhook_url; if (webhook_secret) payload.webhook_secret = webhook_secret; }
 
-  // Attach reference images
-  const refs = [...ref_urls.map(u => getB64(u, null)), ...ref_b64s.map(b => getB64(null, b))].filter(Boolean);
+  // Attach reference images — getB64 is async so resolve all in parallel
+  const refs = (await Promise.all([
+    ...ref_urls.map(u => getB64(u, null).catch(() => null)),
+    ...ref_b64s.map(b => getB64(null, b).catch(() => null)),
+  ])).filter(Boolean);
+  if (ref_urls.length > 0 && refs.length === 0) {
+    console.warn('[generate] All reference images failed to load');
+  }
   refs.forEach((b64, i) => {
     payload[i === 0 ? 'input_image' : `input_image_${i + 1}`] = b64;
   });
@@ -231,7 +272,8 @@ app.post('/api/inpaint', async (req, res) => {
     output_format = 'png', safety_tolerance = 2,
   } = req.body;
 
-  const imageB64 = getB64(imgUrl, image_b64);
+  let imageB64;
+  try { imageB64 = await getB64(imgUrl, image_b64); } catch (e) { return res.status(400).json({ error: 'Could not load source image: ' + e.message }); }
   if (!imageB64) return res.status(400).json({ error: 'No image provided' });
   if (!mask_b64)  return res.status(400).json({ error: 'No mask provided' });
 
@@ -275,7 +317,8 @@ app.post('/api/erase', async (req, res) => {
     output_format = 'png', safety_tolerance = 2,
   } = req.body;
 
-  const imageB64 = getB64(imgUrl, image_b64);
+  let imageB64;
+  try { imageB64 = await getB64(imgUrl, image_b64); } catch (e) { return res.status(400).json({ error: 'Could not load source image: ' + e.message }); }
   if (!imageB64) return res.status(400).json({ error: 'No image provided' });
   if (!mask_b64)  return res.status(400).json({ error: 'No mask provided' });
 
@@ -319,7 +362,8 @@ app.post('/api/outpaint', async (req, res) => {
     output_format = 'png', safety_tolerance = 2,
   } = req.body;
 
-  const imageB64 = getB64(imgUrl, image_b64);
+  let imageB64;
+  try { imageB64 = await getB64(imgUrl, image_b64); } catch (e) { return res.status(400).json({ error: 'Could not load source image: ' + e.message }); }
   if (!imageB64) return res.status(400).json({ error: 'No image provided' });
   if (!width || !height) return res.status(400).json({ error: 'Width and height are required' });
 
@@ -341,6 +385,10 @@ app.post('/api/outpaint', async (req, res) => {
     const localFile = await saveOutput(imageUrl, genId, output_format);
     const entry = {
       id: genId, tool: 'outpaint', model: 'flux-tools/outpainting-v1',
+      width: Number(width), height: Number(height),
+      // Store source offset so client can align the before/after composite
+      reference_offset_x: reference_offset_x != null ? Number(reference_offset_x) : null,
+      reference_offset_y: reference_offset_y != null ? Number(reference_offset_y) : null,
       cost, output_format,
       input_url: imgUrl || null,
       local_file: localFile,
@@ -349,6 +397,7 @@ app.post('/api/outpaint', async (req, res) => {
     };
     appendHistory(entry);
     res.json(entry);
+
   } catch (e) { handleError(res, e); }
 });
 
@@ -364,8 +413,9 @@ app.post('/api/vto', async (req, res) => {
     output_format = 'png', safety_tolerance = 2,
   } = req.body;
 
-  const personB64  = getB64(person_url,  person_b64);
-  const garmentB64 = getB64(garment_url, garment_b64);
+  let personB64, garmentB64;
+  try { personB64  = await getB64(person_url,  person_b64);  } catch (e) { return res.status(400).json({ error: 'Could not load person image: '  + e.message }); }
+  try { garmentB64 = await getB64(garment_url, garment_b64); } catch (e) { return res.status(400).json({ error: 'Could not load garment image: ' + e.message }); }
   if (!personB64)  return res.status(400).json({ error: 'No person image provided' });
   if (!garmentB64) return res.status(400).json({ error: 'No garment image provided' });
 
@@ -401,8 +451,10 @@ app.post('/api/deblur', async (req, res) => {
 
   const { image_url: imgUrl, image_b64, prompt, output_format = 'png', safety_tolerance = 2 } = req.body;
 
-  const imageB64 = getB64(imgUrl, image_b64);
+  let imageB64;
+  try { imageB64 = await getB64(imgUrl, image_b64); } catch (e) { return res.status(400).json({ error: 'Could not load source image: ' + e.message }); }
   if (!imageB64) return res.status(400).json({ error: 'No image provided' });
+
 
   const payload = { image: imageB64, output_format, safety_tolerance: Number(safety_tolerance) };
   if (prompt) payload.prompt = prompt;
@@ -472,11 +524,11 @@ app.post('/api/quit', (req, res) => {
 
 // ─── History ──────────────────────────────────────────────────────────────────
 app.get('/api/history', (_req, res) => {
-  try { res.json(JSON.parse(readFileSync(HISTORY_FILE, 'utf8'))); }
-  catch { res.json([]); }
+  res.json(loadHistoryCache());
 });
 
 app.delete('/api/history', (_req, res) => {
+  _historyCache = [];
   writeFileSync(HISTORY_FILE, '[]');
   writeFileSync(CSV_FILE, 'id,timestamp,tool,model,prompt,width,height,seed,output_format,cost_credits,image_url\n');
   res.json({ ok: true });

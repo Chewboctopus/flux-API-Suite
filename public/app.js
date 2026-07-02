@@ -11,8 +11,11 @@ function toast(msg, type = 'info', duration = 4000) {
   const icons = { success: '✓', error: '✕', warn: '⚠', info: 'ℹ' };
   const el = document.createElement('div');
   el.className = `toast ${type}`;
-  el.innerHTML = `<span class="toast-icon">${icons[type] || 'ℹ'}</span><span class="toast-msg">${msg}</span>`;
-  document.getElementById('toast-container').appendChild(el);
+  const safeMsg = String(msg).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  el.innerHTML = `<span class="toast-icon">${icons[type] || 'ℹ'}</span><span class="toast-msg">${safeMsg}</span>`;
+  const container = document.getElementById('toast-container');
+  if (container.children.length >= 5) container.firstElementChild?.remove();
+  container.appendChild(el);
   setTimeout(() => el.remove(), duration);
 }
 
@@ -23,14 +26,18 @@ async function apiFetch(path, body) {
     headers: { 'Content-Type': 'application/json', 'x-key': API_KEY },
     body: JSON.stringify(body),
   });
-  const data = await res.json();
+  let data;
+  try { data = await res.json(); }
+  catch { throw new Error(`Server error ${res.status} — unexpected response format`); }
   if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
   return data;
 }
 
 async function apiGet(path) {
   const res = await fetch(path, { headers: { 'x-key': API_KEY } });
-  const data = await res.json();
+  let data;
+  try { data = await res.json(); }
+  catch { throw new Error(`Server error ${res.status} — unexpected response format`); }
   if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
   return data;
 }
@@ -541,7 +548,23 @@ let _lbAbState = 'generated';
 let _lbList  = [];   // ordered list of entries visible when lightbox was opened
 let _lbIndex = -1;   // position of current entry in _lbList
 
+// ─── Resize the lightbox panel to fit the OUTPUT image's aspect ratio ─────────
+function _lbSizePanelToEntry(entry) {
+  const inner = document.querySelector('.lightbox-inner');
+  if (!inner) return;
+
+  // Prefer stored metadata; fall back to the loaded img natural size
+  const img = _lbImg();
+  const nW = entry.width  || img?.naturalWidth  || 0;
+  const nH = entry.height || img?.naturalHeight || 0;
+  if (!nW || !nH) { inner.style.removeProperty('aspect-ratio'); return; }
+
+  // Let CSS handle max-width/max-height (90vw × 90vh) — just set the ratio
+  inner.style.aspectRatio = `${nW} / ${nH}`;
+}
+
 function openLightbox(entry, contextList, contextIndex) {
+
   _lightboxEntry = entry;
   _lbAbState = 'generated';
 
@@ -557,30 +580,54 @@ function openLightbox(entry, contextList, contextIndex) {
   _lbUpdateNav();
 
   lbZoomReset(true); // reset pan/zoom for every new image
+  document.getElementById('lb-sendto-menu')?.classList.add('hidden'); // always start closed
+
   const lbImg    = document.getElementById('lightbox-img');
   const lbLabel  = document.getElementById('lightbox-ab-label');
   const lbAbBtn  = document.getElementById('lightbox-ab');
 
   lbImg.src = entry.image_url;
   lbLabel.style.display = 'none';
+
+  // Resize panel to OUTPUT image aspect ratio (portrait vs landscape)
+  _lbSizePanelToEntry(entry);
+  // Also update on load in case width/height not stored for old entries
+  lbImg.onload = () => _lbSizePanelToEntry(entry);
+
   document.getElementById('lightbox-prompt').textContent = entry.prompt || '(no prompt)';
   const details = [entry.model, entry.output_format, entry.width && `${entry.width}×${entry.height}`, entry.seed && `seed:${entry.seed}`, entry.cost && `${entry.cost}cr`].filter(Boolean).join(' · ');
   document.getElementById('lightbox-detail').textContent = details;
   document.getElementById('lightbox-download').href = entry.image_url;
   document.getElementById('lightbox-download').download = entry.local_file || 'output';
 
-  // A/B button
-  if (entry._refPreviewUrl) {
+  // A/B button — works for:
+  //   • Generate results that have a _refPreviewUrl (reference image)
+  //   • Tool results (erase/inpaint/outpaint/vto/deblur) that have an input_url (before image)
+  const beforeUrl  = entry._refPreviewUrl || entry.input_url || null;
+  const isToolAB   = !!entry.input_url && !entry._refPreviewUrl;
+  const labelBefore = isToolAB ? '📷 Before' : '📷 Reference';
+  const labelAfter  = isToolAB ? '✨ After'  : '✨ Generated';
+  const isOutpaint  = entry.tool === 'outpaint' && !!entry.input_url;
+
+  if (beforeUrl) {
     lbAbBtn.style.display = '';
-    lbAbBtn.onclick = () => {
+    lbAbBtn.onclick = async () => {
       if (_lbAbState === 'generated') {
-        lbImg.src = entry._refPreviewUrl;
-        lbLabel.textContent = '📷 Reference';
-        lbLabel.style.display = 'block';
+        // For outpaint: build an aligned composite so source aligns with the output
+        if (isOutpaint) {
+          lbLabel.textContent = '⏳ Aligning…';
+          lbLabel.style.display = 'block';
+          lbImg.src = await _compositeOutpaintBefore(entry);
+          lbLabel.textContent = '📷 Before (aligned)';
+        } else {
+          lbImg.src = beforeUrl;
+          lbLabel.textContent = labelBefore;
+          lbLabel.style.display = 'block';
+        }
         _lbAbState = 'ref';
       } else {
         lbImg.src = entry.image_url;
-        lbLabel.textContent = '✨ Generated';
+        lbLabel.textContent = labelAfter;
         lbLabel.style.display = 'block';
         _lbAbState = 'generated';
         setTimeout(() => { if (_lbAbState === 'generated') lbLabel.style.display = 'none'; }, 1500);
@@ -590,6 +637,7 @@ function openLightbox(entry, contextList, contextIndex) {
     lbAbBtn.style.display = 'none';
     lbAbBtn.onclick = null;
   }
+
 
   // Reload Settings button — show only when entry has a known tool
   const reloadBtn = document.getElementById('lightbox-reload');
@@ -603,6 +651,67 @@ function openLightbox(entry, contextList, contextIndex) {
 
   document.getElementById('lightbox').classList.remove('hidden');
 }
+
+// ─── Outpaint "Before" canvas composite ───────────────────────────────────────
+// Draws the source image at the correct position within an output-sized canvas,
+// so the Before/After views are spatially aligned — no jarring aspect-ratio swap.
+function _compositeOutpaintBefore(entry) {
+  return new Promise(resolve => {
+    const src = new Image();
+
+    src.onload = () => {
+      const outW = entry.width  || src.naturalWidth;
+      const outH = entry.height || src.naturalHeight;
+      const srcW = src.naturalWidth;
+      const srcH = src.naturalHeight;
+
+      const canvas = document.createElement('canvas');
+      canvas.width  = outW;
+      canvas.height = outH;
+      const ctx = canvas.getContext('2d');
+
+      // Dark background to distinguish the expanded / new areas
+      ctx.fillStyle = '#0d0d18';
+      ctx.fillRect(0, 0, outW, outH);
+
+      // Subtle checkerboard over the expanded region so it reads as "empty"
+      const tileSize = 24;
+      ctx.save();
+      for (let ty = 0; ty < outH; ty += tileSize) {
+        for (let tx = 0; tx < outW; tx += tileSize) {
+          ctx.fillStyle = ((tx / tileSize + ty / tileSize) % 2 === 0)
+            ? 'rgba(255,255,255,0.025)' : 'rgba(0,0,0,0)';
+          ctx.fillRect(tx, ty, tileSize, tileSize);
+        }
+      }
+      ctx.restore();
+
+      // Position: use stored reference offsets; default to centering the source
+      const ox = entry.reference_offset_x != null
+        ? Math.round(entry.reference_offset_x)
+        : Math.round((outW - srcW) / 2);
+      const oy = entry.reference_offset_y != null
+        ? Math.round(entry.reference_offset_y)
+        : Math.round((outH - srcH) / 2);
+
+      // Draw source image at correct position
+      ctx.drawImage(src, ox, oy, srcW, srcH);
+
+      // Gold dashed border to mark the original frame boundary
+      ctx.strokeStyle = 'rgba(212,168,67,0.75)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([10, 5]);
+      ctx.strokeRect(ox + 1, oy + 1, srcW - 2, srcH - 2);
+
+      resolve(canvas.toDataURL('image/png'));
+    };
+
+    src.onerror = () => resolve(entry.input_url); // graceful fallback
+    src.src = entry.input_url;
+  });
+}
+
+
 
 function _lbUpdateNav() {
   const prev = document.getElementById('lightbox-prev');
@@ -897,10 +1006,19 @@ _lbSendMenu.addEventListener('click', (e) => {
   if (_lightboxEntry) sendToTool(btn.dataset.sendto, _lightboxEntry.image_url, _lightboxEntry);
 });
 
-// Close dropdown on outside click
+// Close ALL send-to dropdowns on any outside click
 document.addEventListener('click', (e) => {
+  // Lightbox menu
   if (!document.getElementById('lb-sendto-wrap')?.contains(e.target)) {
     _lbSendMenu?.classList.add('hidden');
+  }
+  // Gallery (history) card menus
+  if (!e.target.closest('.hc-sendto-wrap')) {
+    document.querySelectorAll('.hc-sendto-menu').forEach(m => m.classList.add('hidden'));
+  }
+  // Session result card menus
+  if (!e.target.closest('.rc-sendto-wrap')) {
+    document.querySelectorAll('.rc-sendto-menu').forEach(m => m.classList.add('hidden'));
   }
 });
 
@@ -1013,6 +1131,122 @@ if (API_KEY) {
   document.getElementById('input-apikey').value = API_KEY;
   document.getElementById('btn-connect').click();
 }
+
+// ─── Electron environment detection ──────────────────────────────────────────
+if (window.electronAPI?.isElectron) document.body.classList.add('is-electron');
+
+// ─── Settings Modal ───────────────────────────────────────────────────────────
+(function initSettings() {
+  const overlay   = document.getElementById('settings-modal');
+  const closeBtn  = document.getElementById('settings-close-btn');
+  const openBtn   = document.getElementById('btn-settings');
+
+  // ── Open / Close ──────────────────────────────────────────────────────
+  function openSettings() {
+    overlay.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+    _populateSettings();
+  }
+  function closeSettings() {
+    overlay.classList.add('hidden');
+    document.body.style.overflow = '';
+    // Reset folder notice
+    document.getElementById('settings-folder-notice').classList.add('hidden');
+  }
+
+  openBtn.addEventListener('click', openSettings);
+  closeBtn.addEventListener('click', closeSettings);
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeSettings(); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !overlay.classList.contains('hidden')) closeSettings();
+  });
+
+  // ── Populate values ────────────────────────────────────────────────────
+  async function _populateSettings() {
+    // API key (masked)
+    const keyInput = document.getElementById('settings-apikey');
+    keyInput.value = API_KEY || '';
+
+    // Port + data paths — only available in Electron
+    if (window.fluxApp) {
+      try {
+        const config = await window.fluxApp.getConfig();
+        const portInput = document.getElementById('settings-port');
+        portInput.value = config.port || 4242;
+        document.getElementById('settings-port-current').textContent = `(currently :${config.port || 4242})`;
+      } catch { /* ignore */ }
+
+      try {
+        const paths = await apiGet('/api/paths');
+        document.getElementById('settings-path-outputs').textContent = paths.outputs || '—';
+        document.getElementById('settings-path-uploads').textContent = paths.uploads || '—';
+        _outputsPath = paths.outputs;
+        _uploadsPath = paths.uploads;
+      } catch { /* ignore */ }
+    }
+  }
+
+  let _outputsPath = null, _uploadsPath = null;
+
+  // ── API Key reveal toggle ──────────────────────────────────────────────
+  document.getElementById('settings-apikey-reveal').addEventListener('click', () => {
+    const inp = document.getElementById('settings-apikey');
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+  });
+
+  // ── Save API Key ───────────────────────────────────────────────────────
+  document.getElementById('settings-apikey-save').addEventListener('click', () => {
+    const val = document.getElementById('settings-apikey').value.trim();
+    if (!val) { toast('API key cannot be empty', 'warn'); return; }
+    API_KEY = val;
+    localStorage.setItem('flux_api_key', val);
+    toast('API key saved ✓', 'success');
+    closeSettings();
+    loadCredits();
+  });
+
+  // ── Save Port (Electron only) ──────────────────────────────────────────
+  document.getElementById('settings-port-save')?.addEventListener('click', async () => {
+    const p = parseInt(document.getElementById('settings-port').value, 10);
+    if (!p || p < 1024 || p > 65535) { toast('Port must be 1024–65535', 'warn'); return; }
+    if (!window.fluxApp) { toast('Port changes require the desktop app', 'warn'); return; }
+    toast('Saving port and restarting…', 'info', 8000);
+    await window.fluxApp.savePortAndRestart(p);
+  });
+
+  // ── Data Folder (Electron only) ────────────────────────────────────────
+  let _chosenFolder = null;
+
+  document.getElementById('settings-reveal-outputs')?.addEventListener('click', () => {
+    if (_outputsPath && window.fluxApp) window.fluxApp.revealInFinder(_outputsPath);
+  });
+  document.getElementById('settings-reveal-uploads')?.addEventListener('click', () => {
+    if (_uploadsPath && window.fluxApp) window.fluxApp.revealInFinder(_uploadsPath);
+  });
+
+  document.getElementById('settings-folder-browse')?.addEventListener('click', async () => {
+    if (!window.fluxApp) { toast('Folder selection requires the desktop app', 'warn'); return; }
+    const folder = await window.fluxApp.pickFolder();
+    if (!folder) return;
+    _chosenFolder = folder;
+    document.getElementById('settings-folder-chosen').textContent = folder;
+    document.getElementById('settings-folder-notice').classList.remove('hidden');
+  });
+
+  document.getElementById('settings-folder-apply')?.addEventListener('click', async () => {
+    if (!_chosenFolder || !window.fluxApp) return;
+    toast('Applying new data folder and restarting…', 'info', 8000);
+    await window.fluxApp.saveDataDir(_chosenFolder);
+  });
+
+  document.getElementById('settings-folder-cancel')?.addEventListener('click', () => {
+    _chosenFolder = null;
+    document.getElementById('settings-folder-notice').classList.add('hidden');
+  });
+
+})();
+
+
 
 // ─── Slider sync helper ───────────────────────────────────────────────────────
 function syncSlider(sliderId, displayId) {
@@ -1908,7 +2142,7 @@ function renderHistory() {
   }
   empty.classList.add('hidden');
 
-  items.forEach(entry => {
+  items.forEach((entry, idx) => {
     if (!entry.image_url) return; // skip malformed entries
 
     // A/B compare source: use the entry's stored input_url or first ref_url
@@ -1994,7 +2228,7 @@ function renderHistory() {
     cardImg?.addEventListener('click', () => {
       if (_compareMode) { selectForCompare(entry); return; }
       if (refPreview) entry._refPreviewUrl = refPreview;
-      openLightbox(entry);
+      openLightbox(entry, items, idx);
     });
     grid.appendChild(card);
   });
@@ -2022,7 +2256,7 @@ function renderHistoryList(items) {
   body.innerHTML = '';
   if (!items.length) { empty.classList.remove('hidden'); return; }
   empty.classList.add('hidden');
-  items.forEach(e => {
+  items.forEach((e, idx) => {
     const ts   = new Date(e.timestamp).toLocaleString(undefined, { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
     const row  = document.createElement('tr');
     row.style.borderBottom = '1px solid var(--border)';
@@ -2036,8 +2270,8 @@ function renderHistoryList(items) {
       <td style="padding:8px 14px;font-size:11px;color:var(--text-muted);font-family:'JetBrains Mono',monospace">${e.seed || '—'}</td>
       <td style="padding:8px 14px;font-size:11px;color:var(--text-secondary)">${e.cost != null ? e.cost+'cr' : '—'}</td>
       <td style="padding:8px 14px"><img src="${e.image_url}" style="height:40px;width:auto;border-radius:4px;cursor:pointer" loading="lazy"></td>`;
-    row.querySelector('img').addEventListener('click', () => openLightbox(e));
-    row.addEventListener('click', ev => { if (ev.target.tagName !== 'IMG') openLightbox(e); });
+    row.querySelector('img').addEventListener('click', () => openLightbox(e, items, idx));
+    row.addEventListener('click', ev => { if (ev.target.tagName !== 'IMG') openLightbox(e, items, idx); });
     row.addEventListener('mouseenter', () => row.style.background = 'var(--bg-hover)');
     row.addEventListener('mouseleave', () => row.style.background = '');
     body.appendChild(row);
@@ -2110,6 +2344,12 @@ document.addEventListener('keydown', e => {
     if (!cm.classList.contains('hidden'))  { cm.classList.add('hidden'); return; }
     if (!lb.classList.contains('hidden'))  { lb.classList.add('hidden'); return; }
     if (!pm.classList.contains('hidden'))  { pm.classList.add('hidden'); return; }
+  }
+
+  // Arrow keys navigate lightbox when it is open
+  if (!lb.classList.contains('hidden') && pm.classList.contains('hidden')) {
+    if (e.key === 'ArrowLeft')  { e.preventDefault(); _lbNavigate(-1); return; }
+    if (e.key === 'ArrowRight') { e.preventDefault(); _lbNavigate(+1); return; }
   }
 
   // ? opens shortcuts (but not when typing)

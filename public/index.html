@@ -967,6 +967,76 @@
   </div>
 </div>
 
+<!-- ═══ SETTINGS MODAL ════════════════════════════════════════════════════════ -->
+<div id="settings-modal" class="settings-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+  <div class="settings-panel">
+    <div class="settings-header">
+      <h2 class="settings-title" id="settings-title">⚙ Settings</h2>
+      <button class="settings-close" id="settings-close-btn" aria-label="Close settings">✕</button>
+    </div>
+
+    <div class="settings-body">
+
+      <!-- ── API Key ─────────────────────────────────────────────── -->
+      <section class="settings-section">
+        <div class="settings-section-title">API Key</div>
+        <p class="settings-desc">Your BFL API key. Never shared — stored only in this browser's localStorage.</p>
+        <div class="settings-row">
+          <input type="password" id="settings-apikey" class="settings-input" placeholder="Enter your BFL API key" autocomplete="off" spellcheck="false">
+          <button class="btn btn-secondary btn-sm" id="settings-apikey-reveal" title="Show / hide key">👁</button>
+        </div>
+        <div class="settings-actions">
+          <button class="btn btn-primary btn-sm" id="settings-apikey-save">Save API Key</button>
+        </div>
+      </section>
+
+      <!-- ── Port ───────────────────────────────────────────────── -->
+      <section class="settings-section" id="settings-port-section">
+        <div class="settings-section-title">App Port</div>
+        <p class="settings-desc">The local port FLUX Studio listens on. <strong>Keep this fixed</strong> — changing it clears your localStorage (API key, history).</p>
+        <div class="settings-row">
+          <input type="number" id="settings-port" class="settings-input settings-input-sm" min="1024" max="65535" placeholder="4242">
+          <span class="settings-port-label" id="settings-port-current"></span>
+        </div>
+        <div class="settings-actions">
+          <button class="btn btn-primary btn-sm" id="settings-port-save">Save Port &amp; Restart</button>
+        </div>
+      </section>
+
+      <!-- ── Data Folder ────────────────────────────────────────── -->
+      <section class="settings-section" id="settings-folder-section">
+        <div class="settings-section-title">Data Folder</div>
+        <p class="settings-desc">Where your generated images and history are saved. Changing this restarts the app — existing files are <em>not</em> moved automatically.</p>
+
+        <div class="settings-path-row">
+          <span class="settings-path-label">Outputs</span>
+          <span class="settings-path-val" id="settings-path-outputs">—</span>
+          <button class="btn btn-secondary btn-sm" id="settings-reveal-outputs" title="Reveal in Finder">📂</button>
+        </div>
+        <div class="settings-path-row">
+          <span class="settings-path-label">Uploads</span>
+          <span class="settings-path-val" id="settings-path-uploads">—</span>
+          <button class="btn btn-secondary btn-sm" id="settings-reveal-uploads" title="Reveal in Finder">📂</button>
+        </div>
+
+        <div class="settings-actions">
+          <button class="btn btn-secondary btn-sm" id="settings-folder-browse">📁 Choose New Folder…</button>
+        </div>
+
+        <div class="settings-notice hidden" id="settings-folder-notice">
+          <strong>New folder:</strong> <span id="settings-folder-chosen"></span>
+          <div class="settings-actions">
+            <button class="btn btn-primary btn-sm" id="settings-folder-apply">Apply &amp; Restart</button>
+            <button class="btn btn-secondary btn-sm" id="settings-folder-cancel">Cancel</button>
+          </div>
+        </div>
+      </section>
+
+    </div><!-- /settings-body -->
+  </div><!-- /settings-panel -->
+</div><!-- /settings-modal -->
+
+
 <script src="app.js" type="module"></script>
 </body>
 
