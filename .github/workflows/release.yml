@@ -68,3 +68,25 @@ jobs:
         run: npm run electron:build:linux -- --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  verify-release:
+    name: Verify Release Completeness
+    needs: [build-mac-arm64, build-mac-x64, build-win, build-linux]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check build results
+        run: |
+          echo "macOS arm64: ${{ needs.build-mac-arm64.result }}"
+          echo "macOS x64: ${{ needs.build-mac-x64.result }}"
+          echo "Windows: ${{ needs.build-win.result }}"
+          echo "Linux: ${{ needs.build-linux.result }}"
+          
+          if [ "${{ needs.build-mac-arm64.result }}" != "success" ] || \
+             [ "${{ needs.build-mac-x64.result }}" != "success" ] || \
+             [ "${{ needs.build-win.result }}" != "success" ] || \
+             [ "${{ needs.build-linux.result }}" != "success" ]; then
+            echo "❌ One or more builds failed!"
+            exit 1
+          fi
+          echo "✅ All builds completed successfully!"
