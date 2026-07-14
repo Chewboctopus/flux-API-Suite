@@ -23,10 +23,11 @@ jobs:
         run: npm run electron:build:mac -- --publish always --arch arm64
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
 
   build-mac-x64:
     name: macOS x64 (Intel DMG)
-    runs-on: macos-13
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -38,6 +39,7 @@ jobs:
         run: npm run electron:build:mac -- --publish always --arch x64
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
 
   build-win:
     name: Windows (NSIS installer)
@@ -81,7 +83,7 @@ jobs:
           echo "macOS x64: ${{ needs.build-mac-x64.result }}"
           echo "Windows: ${{ needs.build-win.result }}"
           echo "Linux: ${{ needs.build-linux.result }}"
-          
+
           if [ "${{ needs.build-mac-arm64.result }}" != "success" ] || \
              [ "${{ needs.build-mac-x64.result }}" != "success" ] || \
              [ "${{ needs.build-win.result }}" != "success" ] || \
