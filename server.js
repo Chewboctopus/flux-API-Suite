@@ -543,6 +543,9 @@ app.get('/api/log', (_req, res) => {
 });
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
+// Bind explicitly to loopback — several routes below (upload, history, config,
+// paths) have no auth check beyond the BFL x-key, so this must not be reachable
+// from the LAN.
+app.listen(PORT, '127.0.0.1', () => {
   console.log(`\n  🎨 FLUX Studio  →  http://localhost:${PORT}\n`);
 });

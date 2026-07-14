@@ -10,6 +10,7 @@ const http   = require('http');
 const net    = require('net');
 const fs     = require('fs');
 const { pathToFileURL } = require('url');
+const { autoUpdater } = require('electron-updater');
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const IS_DEV       = !app.isPackaged;
@@ -328,10 +329,31 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+// ── Auto-update (GitHub Releases via electron-builder's publish config) ───────
+// Note: macOS builds are currently unsigned (CSC_IDENTITY_AUTO_DISCOVERY is
+// disabled in CI because there's no Apple Developer ID cert). Squirrel.Mac
+// generally needs a signed, notarized app to apply updates reliably under
+// Gatekeeper — so auto-update is expected to work on Windows/Linux now, but
+// may silently fail to apply on macOS until the build is signed. It's safe to
+// leave enabled either way: it just won't find/apply anything on mac.
+function initAutoUpdate() {
+  if (IS_DEV) return;
+  autoUpdater.autoDownload = true;
+  autoUpdater.on('error', (e) => console.error('[AutoUpdate] error:', e?.message || e));
+  autoUpdater.on('update-available', (info) => console.log('[AutoUpdate] update available:', info?.version));
+  autoUpdater.on('update-downloaded', (info) => {
+    console.log('[AutoUpdate] downloaded, will install on quit:', info?.version);
+  });
+  autoUpdater.checkForUpdatesAndNotify().catch((e) =>
+    console.error('[AutoUpdate] check failed:', e?.message || e)
+  );
+}
+
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 app.whenReady().then(() => {
   buildMenu();
   createWindow();
+  initAutoUpdate();
 });
 
 app.on('window-all-closed', () => {

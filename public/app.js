@@ -1329,7 +1329,7 @@ function createRefSlot(i) {
     if (i === 0) {
       const dimImg = new Image();
       dimImg.onload = () => {
-        const MAX_MP = 4_000_000; // FLUX.2 hard cap
+        const MAX_MP = 4_194_304; // FLUX.2 hard cap — 4MP, e.g. 2048×2048
         let w = dimImg.naturalWidth;
         let h = dimImg.naturalHeight;
         const origW = w, origH = h;
@@ -1466,14 +1466,14 @@ const _lock = () => document.getElementById('gen-ar-lock');
 let GEN_AR_LOCKED = false;
 let GEN_AR_RATIO  = 1; // w / h
 
-function _snap8(n) { return Math.max(64, Math.min(4096, Math.round(n / 8) * 8)); }
+function _snap16(n) { return Math.max(64, Math.min(4096, Math.round(n / 16) * 16)); }
 
 function _applyARLock(changed) {
   if (!GEN_AR_LOCKED) return;
   if (changed === 'w') {
-    _gH().value = _snap8(parseInt(_gW().value) / GEN_AR_RATIO);
+    _gH().value = _snap16(parseInt(_gW().value) / GEN_AR_RATIO);
   } else {
-    _gW().value = _snap8(parseInt(_gH().value) * GEN_AR_RATIO);
+    _gW().value = _snap16(parseInt(_gH().value) * GEN_AR_RATIO);
   }
 }
 
@@ -1512,21 +1512,21 @@ document.getElementById('gen-size-presets').addEventListener('click', e => {
     let newW, newH;
     if (ratio >= 1) { newW = targetLong; newH = targetLong / ratio; }
     else            { newH = targetLong; newW = targetLong * ratio; }
-    // Clamp to 4MP
+    // Clamp to 4MP (FLUX.2 hard cap — 4,194,304px², e.g. 2048×2048)
     const px = newW * newH;
-    if (px > 4_000_000) {
-      const s = Math.sqrt(4_000_000 / px);
+    if (px > 4_194_304) {
+      const s = Math.sqrt(4_194_304 / px);
       newW *= s; newH *= s;
     }
-    _gW().value = _snap8(newW);
-    _gH().value = _snap8(newH);
+    _gW().value = _snap16(newW);
+    _gH().value = _snap16(newH);
     if (GEN_AR_LOCKED) GEN_AR_RATIO = parseInt(_gW().value) / parseInt(_gH().value);
   }
 
   if (btn.dataset.size === 'max') {
     // Compute the long edge that fills exactly 4MP at current ratio
     const longRatio = ratio >= 1 ? ratio : 1 / ratio;
-    const maxLong   = Math.sqrt(4_000_000 * longRatio);
+    const maxLong   = Math.sqrt(4_194_304 * longRatio);
     applyLong(maxLong);
   } else {
     applyLong(parseInt(btn.dataset.size));
@@ -1715,7 +1715,7 @@ let _opLockedRatio = null; // W/H
 const _opWEl = () => document.getElementById('op-width');
 const _opHEl = () => document.getElementById('op-height');
 
-function _opClamp(v) { return Math.max(64, Math.min(4096, Math.round(v / 8) * 8)); }
+function _opClamp(v) { return Math.max(64, Math.min(4096, Math.round(v / 16) * 16)); }
 
 function _opSetWH(w, h, updatePreview = true) {
   _opWEl().value = _opClamp(w);
@@ -2263,13 +2263,13 @@ function renderHistoryList(items) {
     row.style.cursor = 'pointer';
     row.innerHTML = `
       <td style="padding:8px 14px;white-space:nowrap;color:var(--text-secondary);font-size:11px">${ts}</td>
-      <td style="padding:8px 14px"><span class="tool-badge ${e.tool}" style="font-size:10px">${e.tool}</span></td>
-      <td style="padding:8px 14px;font-size:11px;color:var(--text-secondary)">${e.model || '—'}</td>
-      <td style="padding:8px 14px;font-size:12px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(e.prompt||'').replace(/"/g,'&quot;')}">${e.prompt || '(none)'}</td>
+      <td style="padding:8px 14px"><span class="tool-badge ${escHtml(e.tool)}" style="font-size:10px">${escHtml(e.tool)}</span></td>
+      <td style="padding:8px 14px;font-size:11px;color:var(--text-secondary)">${escHtml(e.model) || '—'}</td>
+      <td style="padding:8px 14px;font-size:12px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(e.prompt)}">${escHtml(e.prompt) || '(none)'}</td>
       <td style="padding:8px 14px;font-size:11px;color:var(--text-secondary)">${e.width && e.height ? e.width+'×'+e.height : '—'}</td>
       <td style="padding:8px 14px;font-size:11px;color:var(--text-muted);font-family:'JetBrains Mono',monospace">${e.seed || '—'}</td>
       <td style="padding:8px 14px;font-size:11px;color:var(--text-secondary)">${e.cost != null ? e.cost+'cr' : '—'}</td>
-      <td style="padding:8px 14px"><img src="${e.image_url}" style="height:40px;width:auto;border-radius:4px;cursor:pointer" loading="lazy"></td>`;
+      <td style="padding:8px 14px"><img src="${escHtml(e.image_url)}" style="height:40px;width:auto;border-radius:4px;cursor:pointer" loading="lazy"></td>`;
     row.querySelector('img').addEventListener('click', () => openLightbox(e, items, idx));
     row.addEventListener('click', ev => { if (ev.target.tagName !== 'IMG') openLightbox(e, items, idx); });
     row.addEventListener('mouseenter', () => row.style.background = 'var(--bg-hover)');
@@ -2498,9 +2498,9 @@ function openCompareModal(a, b) {
   document.getElementById('compare-img-a').src = a.image_url;
   document.getElementById('compare-img-b').src = b.image_url;
   document.getElementById('compare-meta-a').innerHTML =
-    `<strong>${a.prompt || '(no prompt)'}</strong><br>${fmt(a)}`;
+    `<strong>${escHtml(a.prompt) || '(no prompt)'}</strong><br>${escHtml(fmt(a))}`;
   document.getElementById('compare-meta-b').innerHTML =
-    `<strong>${b.prompt || '(no prompt)'}</strong><br>${fmt(b)}`;
+    `<strong>${escHtml(b.prompt) || '(no prompt)'}</strong><br>${escHtml(fmt(b))}`;
   document.getElementById('compare-modal').classList.remove('hidden');
 }
 

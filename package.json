@@ -15,7 +15,8 @@
   },
   "dependencies": {
     "express": "^5.1.0",
-    "multer":  "^2.2.0"
+    "multer":  "^2.2.0",
+    "electron-updater": "^6.3.9"
   },
   "devDependencies": {
     "electron":         "^36.4.0",
