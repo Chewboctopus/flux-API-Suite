@@ -45,18 +45,57 @@ The app is open source — you can review every line of code in this repo.
 
 ## Run from Source
 
-If you prefer not to use the installer:
+If you prefer not to use the installer, you can run the app directly from the source code.
 
-```bash
-git clone https://github.com/your-username/flux-studio.git
-cd flux-studio
-npm install
-npm start
-```
+### Prerequisites
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+- [**Node.js 18+**](https://nodejs.org) — download the **LTS** installer for your platform and run it. This gives you the `node` and `npm` commands.
 
-> Requires [Node.js 18+](https://nodejs.org)
+### Quick Start
+
+Once Node.js is installed, just double-click the launcher for your platform:
+
+| Platform | File | What it does |
+|---|---|---|
+| **Windows** | `start.bat` | Checks for Node.js → installs dependencies → starts the server |
+| **macOS / Linux** | `start.sh` | Same as above (run `chmod +x start.sh` first on Linux) |
+
+The launcher will tell you exactly what's wrong if anything is missing.
+
+> [!WARNING]
+> **Windows users:** Do **not** double-click `server.js` in File Explorer — that opens it in Windows Script Host, which cannot run this app. Use `start.bat` instead.
+
+### Setup
+
+1. **Clone or download** the repository:
+   ```bash
+   git clone https://github.com/your-username/flux-studio.git
+   cd flux-studio
+   ```
+
+2. **Open a terminal in the project folder:**
+   - **Windows:** Open the folder in File Explorer → click the address bar → type `cmd` → press Enter
+   - **macOS:** Right-click the folder → *Open Terminal Here* (or drag it onto the Terminal icon)
+   - **Linux:** Right-click → *Open in Terminal*
+
+3. **Install dependencies:**
+   ```bash
+   npm install
+   ```
+
+4. **(Optional) Configure environment:**
+   ```bash
+   cp .env.example .env
+   ```
+   Edit `.env` to change the default port if needed. The API key is entered in the browser UI, not here.
+
+### Running
+
+| Command | What it does |
+|---|---|
+| `npm start` | Starts the Express server — open [http://localhost:3000](http://localhost:3000) in your browser |
+| `npm run dev` | Same as above but auto-restarts on file changes (for development) |
+| `npm run electron` | Launches the full desktop app (Electron window + embedded server) |
 
 ---
 
