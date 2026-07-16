@@ -624,16 +624,24 @@
               <div class="section-title">Model</div>
               <div class="field">
                 <select id="upscale-model">
-                  <optgroup label="── Precision ──">
-                    <option value="Standard V2" selected>Standard V2 — General purpose</option>
-                    <option value="Low Resolution V2">Low Resolution V2 — For very small inputs</option>
+                  <optgroup label="── Gigapixel · Precision ──">
+                    <option value="Standard V2" data-tier="precision" selected>Standard 2 — General purpose, default</option>
+                    <option value="High Fidelity V2" data-tier="precision">High Fidelity 2 — Max source preservation</option>
+                    <option value="Low Resolution V2" data-tier="precision">Low Resolution 2 — Small/compressed inputs</option>
+                    <option value="CGI" data-tier="precision">Art &amp; CGI — Illustrations, renders, digital art</option>
+                    <option value="Text Refine" data-tier="precision">Text &amp; Shapes — Logos, UI, typography</option>
+                    <option value="Faces" data-tier="faces">Recover Faces — Reconstruct low-res faces</option>
+                    <option value="Transparency Upscale" data-tier="transparent">Transparent Image Upscale — Preserves alpha (PNG only)</option>
                   </optgroup>
-                  <optgroup label="── Generative ──">
-                    <option value="Wonder 2">Wonder 2 — Generative upscaling</option>
-                    <option value="Recover 3">Recover 3 — Restore degraded images</option>
+                  <optgroup label="── Wonder · Generative ──">
+                    <option value="Standard MAX" data-tier="generative">Standard Max — Efficient generative default</option>
+                    <option value="Wonder 2" data-tier="generative">Wonder 2 — Strongest realism &amp; detail</option>
+                    <option value="Redefine" data-tier="generative">Redefine — Prompt-driven generative repair</option>
+                    <option value="Recover 3" data-tier="generative">Recover 3 — Heavily degraded/damaged sources</option>
                   </optgroup>
-                  <optgroup label="── Creative ──">
-                    <option value="Bloom Creative">Bloom Creative — Stylized upscaling (up to 8×)</option>
+                  <optgroup label="── Bloom · Creative ──">
+                    <option value="Bloom" data-tier="creative">Bloom Creative — Max stylization (up to 8×)</option>
+                    <option value="Bloom Realism" data-tier="creative">Bloom Realism — Grounded, realistic detail</option>
                   </optgroup>
                 </select>
               </div>
@@ -641,7 +649,7 @@
 
             <div class="section">
               <div class="section-title">Parameters</div>
-              <div class="field">
+              <div class="field" id="upscale-format-wrap">
                 <div class="field-label">Output Format</div>
                 <select id="upscale-format">
                   <option value="png">PNG</option>
@@ -650,22 +658,84 @@
                 </select>
               </div>
 
-              <div class="field">
+              <div class="field" id="upscale-width-wrap">
                 <div class="field-label">Output Width <span class="field-hint">blank = auto</span></div>
                 <input type="number" id="upscale-width" placeholder="auto" min="1" step="1">
               </div>
-              <div class="field">
+              <div class="field" id="upscale-height-wrap">
                 <div class="field-label">Output Height <span class="field-hint">blank = auto</span></div>
                 <input type="number" id="upscale-height" placeholder="auto" min="1" step="1">
               </div>
 
-              <div class="toggle-row">
+              <div class="toggle-row" id="upscale-crop-wrap">
+                <span class="toggle-label">Crop to Fill <span class="field-hint">vs. letterbox</span></span>
+                <label class="toggle"><input type="checkbox" id="upscale-crop"><span class="toggle-slider"></span></label>
+              </div>
+
+              <div class="field" id="upscale-subject-wrap">
+                <div class="field-label">Apply Enhancement To</div>
+                <select id="upscale-subject">
+                  <option value="">Auto</option>
+                  <option value="foreground">Foreground</option>
+                  <option value="background">Background</option>
+                  <option value="all">All</option>
+                </select>
+              </div>
+
+              <div class="toggle-row" id="upscale-face-wrap">
                 <span class="toggle-label">Face Enhancement</span>
                 <label class="toggle"><input type="checkbox" id="upscale-face"><span class="toggle-slider"></span></label>
               </div>
-              <div class="field hidden" id="upscale-face-creativity-wrap">
-                <div class="field-label">Face Creativity <span id="upscale-face-val" class="field-hint">0.5</span></div>
+              <div class="field hidden" id="upscale-face-opts-wrap">
+                <div class="field-label">Face Strength <span id="upscale-face-strength-val" class="field-hint">0.5</span></div>
+                <input type="range" id="upscale-face-strength" min="0" max="1" value="0.5" step="0.05">
+                <div class="field-label" style="margin-top:8px">Face Creativity <span id="upscale-face-val" class="field-hint">0.5</span></div>
                 <input type="range" id="upscale-face-creativity" min="0" max="1" value="0.5" step="0.05">
+              </div>
+
+              <div class="field" id="upscale-sharpen-wrap">
+                <div class="field-label">Sharpen <span id="upscale-sharpen-val" class="field-hint">auto</span></div>
+                <input type="range" id="upscale-sharpen" min="0" max="1" value="0" step="0.05">
+              </div>
+              <div class="field" id="upscale-denoise-wrap">
+                <div class="field-label">Denoise <span id="upscale-denoise-val" class="field-hint">auto</span></div>
+                <input type="range" id="upscale-denoise" min="0" max="1" value="0" step="0.05">
+              </div>
+            </div>
+
+            <div class="section" id="upscale-gen-section">
+              <div class="section-title">Generative Options</div>
+              <div class="field">
+                <div class="field-label">Prompt <span class="field-hint">optional — describe the result</span></div>
+                <textarea id="upscale-prompt" rows="2" maxlength="1024" placeholder="e.g. sharp facial detail, natural skin texture"></textarea>
+              </div>
+              <div class="toggle-row">
+                <span class="toggle-label">Auto-Prompt <span class="field-hint">ignores prompt above</span></span>
+                <label class="toggle"><input type="checkbox" id="upscale-autoprompt"><span class="toggle-slider"></span></label>
+              </div>
+              <div class="field">
+                <div class="field-label">Creativity <span id="upscale-creativity-val" class="field-hint">3</span></div>
+                <input type="range" id="upscale-creativity" min="1" max="9" value="3" step="1">
+              </div>
+              <div class="field">
+                <div class="field-label">Texture <span id="upscale-texture-val" class="field-hint">auto</span></div>
+                <input type="range" id="upscale-texture" min="1" max="5" value="1" step="1">
+              </div>
+              <div class="toggle-row">
+                <span class="toggle-label">Extra Detail Pass</span>
+                <label class="toggle"><input type="checkbox" id="upscale-detail"><span class="toggle-slider"></span></label>
+              </div>
+              <div class="field hidden" id="upscale-detail-strength-wrap">
+                <div class="field-label">Detail Strength <span id="upscale-detail-val" class="field-hint">5</span></div>
+                <input type="range" id="upscale-detail-strength" min="0" max="10" value="5" step="0.5">
+              </div>
+            </div>
+
+            <div class="section hidden" id="upscale-faces-section">
+              <div class="section-title">Recover Faces Options</div>
+              <div class="field">
+                <div class="field-label">Strength <span id="upscale-faces-strength-val" class="field-hint">0.8</span></div>
+                <input type="range" id="upscale-faces-strength" min="0" max="1" value="0.8" step="0.05">
               </div>
             </div>
 

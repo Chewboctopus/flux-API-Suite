@@ -2178,15 +2178,81 @@ document.getElementById('btn-deblur').addEventListener('click', async () => {
 // ─── UPSCALE (Topaz) tab ──────────────────────────────────────────────────────
 const upscaleUZ = new UploadZone('upscale-upload', 'upscale-file', 'upscale-img-preview');
 
-// Show/hide face creativity slider based on face enhancement checkbox
-document.getElementById('upscale-face').addEventListener('change', (e) => {
-  const wrap = document.getElementById('upscale-face-creativity-wrap');
-  if (e.target.checked) wrap.classList.remove('hidden');
-  else                   wrap.classList.add('hidden');
+// Which parameter groups are relevant for each model tier.
+// precision   = Gigapixel models (enhance/async)
+// generative  = Wonder models (enhance-gen/async)
+// creative    = Bloom models (enhance-gen/async)
+// faces       = Recover Faces (restore-gen/async) — its own tiny param set
+// transparent = Transparent Image Upscale (tool/async) — PNG only, no face/sharpen/denoise
+const UPSCALE_TIER_VISIBILITY = {
+  precision:   ['format', 'width', 'height', 'crop', 'subject', 'face', 'sharpen', 'denoise'],
+  generative:  ['format', 'width', 'height', 'crop', 'subject', 'face', 'sharpen', 'denoise', 'gen'],
+  creative:    ['format', 'width', 'height', 'crop', 'subject', 'face', 'sharpen', 'denoise', 'gen'],
+  faces:       ['format', 'faces'],
+  transparent: ['width', 'height', 'crop'],
+};
+
+const UPSCALE_WRAP_IDS = {
+  format: 'upscale-format-wrap', width: 'upscale-width-wrap', height: 'upscale-height-wrap',
+  crop: 'upscale-crop-wrap', subject: 'upscale-subject-wrap', face: 'upscale-face-wrap',
+  sharpen: 'upscale-sharpen-wrap', denoise: 'upscale-denoise-wrap', gen: 'upscale-gen-section',
+  faces: 'upscale-faces-section',
+};
+
+function applyUpscaleTier() {
+  const sel = document.getElementById('upscale-model');
+  const tier = sel.options[sel.selectedIndex].dataset.tier || 'precision';
+  const visible = new Set(UPSCALE_TIER_VISIBILITY[tier] || []);
+
+  for (const [key, id] of Object.entries(UPSCALE_WRAP_IDS)) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.classList.toggle('hidden', !visible.has(key));
+  }
+
+  // Face enhancement sub-fields follow both the tier AND the checkbox state
+  const faceOptsWrap = document.getElementById('upscale-face-opts-wrap');
+  if (visible.has('face') && document.getElementById('upscale-face').checked) {
+    faceOptsWrap.classList.remove('hidden');
+  } else {
+    faceOptsWrap.classList.add('hidden');
+  }
+
+  // Transparent Image Upscale is PNG-only
+  if (tier === 'transparent') {
+    document.getElementById('upscale-format').value = 'png';
+  }
+}
+
+document.getElementById('upscale-model').addEventListener('change', applyUpscaleTier);
+applyUpscaleTier();
+
+// Show/hide face strength+creativity sliders based on face enhancement checkbox
+document.getElementById('upscale-face').addEventListener('change', applyUpscaleTier);
+
+// Show/hide detail-strength slider based on the extra-detail-pass checkbox
+document.getElementById('upscale-detail').addEventListener('change', (e) => {
+  document.getElementById('upscale-detail-strength-wrap').classList.toggle('hidden', !e.target.checked);
 });
 
-document.getElementById('upscale-face-creativity').addEventListener('input', (e) => {
-  document.getElementById('upscale-face-val').textContent = e.target.value;
+// Live-update labels next to every slider
+const upscaleSliderLabels = [
+  ['upscale-face-strength', 'upscale-face-strength-val'],
+  ['upscale-face-creativity', 'upscale-face-val'],
+  ['upscale-sharpen', 'upscale-sharpen-val', v => v === '0' ? 'auto' : v],
+  ['upscale-denoise', 'upscale-denoise-val', v => v === '0' ? 'auto' : v],
+  ['upscale-creativity', 'upscale-creativity-val'],
+  ['upscale-texture', 'upscale-texture-val'],
+  ['upscale-detail-strength', 'upscale-detail-val'],
+  ['upscale-faces-strength', 'upscale-faces-strength-val'],
+];
+upscaleSliderLabels.forEach(([inputId, labelId, fmt]) => {
+  const input = document.getElementById(inputId);
+  const label = document.getElementById(labelId);
+  if (!input || !label) return;
+  input.addEventListener('input', (e) => {
+    label.textContent = fmt ? fmt(e.target.value) : e.target.value;
+  });
 });
 
 document.getElementById('btn-upscale').addEventListener('click', async () => {
@@ -2198,23 +2264,61 @@ document.getElementById('btn-upscale').addEventListener('click', async () => {
   const stopTimer = startTimer(document.getElementById('upscale-elapsed'));
 
   try {
-    const model = document.getElementById('upscale-model').value;
+    const sel = document.getElementById('upscale-model');
+    const model = sel.value;
+    const tier = sel.options[sel.selectedIndex].dataset.tier || 'precision';
     const format = document.getElementById('upscale-format').value;
-    const width = document.getElementById('upscale-width').value.trim();
-    const height = document.getElementById('upscale-height').value.trim();
-    const face = document.getElementById('upscale-face').checked;
-    const faceCreativity = document.getElementById('upscale-face-creativity').value;
 
     const payload = {
       image_url: upscaleUZ.url,
       model,
       output_format: format,
     };
-    if (width)  payload.output_width = Number(width);
-    if (height) payload.output_height = Number(height);
-    if (face) {
+
+    const isVisible = (id) => !document.getElementById(id).classList.contains('hidden');
+
+    if (isVisible('upscale-width-wrap')) {
+      const width = document.getElementById('upscale-width').value.trim();
+      if (width) payload.output_width = Number(width);
+    }
+    if (isVisible('upscale-height-wrap')) {
+      const height = document.getElementById('upscale-height').value.trim();
+      if (height) payload.output_height = Number(height);
+    }
+    if (isVisible('upscale-crop-wrap') && document.getElementById('upscale-crop').checked) {
+      payload.crop_to_fill = true;
+    }
+    if (isVisible('upscale-subject-wrap')) {
+      const subject = document.getElementById('upscale-subject').value;
+      if (subject) payload.subject_detection = subject;
+    }
+    if (isVisible('upscale-face-wrap') && document.getElementById('upscale-face').checked) {
       payload.face_enhancement = true;
-      payload.face_enhancement_creativity = Number(faceCreativity);
+      payload.face_enhancement_strength = Number(document.getElementById('upscale-face-strength').value);
+      payload.face_enhancement_creativity = Number(document.getElementById('upscale-face-creativity').value);
+    }
+    if (isVisible('upscale-sharpen-wrap')) {
+      const sharpen = document.getElementById('upscale-sharpen').value;
+      if (Number(sharpen) > 0) payload.sharpen = Number(sharpen);
+    }
+    if (isVisible('upscale-denoise-wrap')) {
+      const denoise = document.getElementById('upscale-denoise').value;
+      if (Number(denoise) > 0) payload.denoise = Number(denoise);
+    }
+    if (!document.getElementById('upscale-gen-section').classList.contains('hidden')) {
+      const prompt = document.getElementById('upscale-prompt').value.trim();
+      const autoprompt = document.getElementById('upscale-autoprompt').checked;
+      if (autoprompt) payload.autoprompt = true;
+      else if (prompt) payload.prompt = prompt;
+      payload.creativity = Number(document.getElementById('upscale-creativity').value);
+      payload.texture = Number(document.getElementById('upscale-texture').value);
+      if (document.getElementById('upscale-detail').checked) {
+        payload.detail = true;
+        payload.detail_strength = Number(document.getElementById('upscale-detail-strength').value);
+      }
+    }
+    if (tier === 'faces') {
+      payload.strength = Number(document.getElementById('upscale-faces-strength').value);
     }
 
     // Submit async job
@@ -2230,7 +2334,7 @@ document.getElementById('btn-upscale').addEventListener('click', async () => {
       const resStatus = await topazGet(`/api/topaz/status/${processId}`);
       status = resStatus.status;
       progress = resStatus.progress ?? 0;
-      
+
       const pct = progress ? ` (${Math.round(progress * 100)}%)` : '';
       document.getElementById('upscale-status-text').textContent = `Processing...${pct}`;
 
@@ -2247,7 +2351,7 @@ document.getElementById('btn-upscale').addEventListener('click', async () => {
       input_url: upscaleUZ.url
     });
     const entry = await topazGet(`/api/topaz/download/${processId}?${params.toString()}`);
-    
+
     renderSingleResult('upscale-results', entry);
     if (entry._refPreviewUrl == null && upscaleUZ.objUrl) entry._refPreviewUrl = upscaleUZ.objUrl;
     toast('Upscale complete!', 'success');

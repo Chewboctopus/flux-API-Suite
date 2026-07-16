@@ -26,13 +26,15 @@ This appears because the app is not code-signed (signing costs ~$400/yr). To pro
 1. Click **"More info"**
 2. Click **"Run anyway"**
 
-### macOS — "App is damaged" Warning
+### macOS — Gatekeeper Warning
 
-Because the macOS builds are unsigned, Gatekeeper flags downloads from the web with a quarantine attribute. If you see:
+The macOS builds are ad-hoc signed (not by a paid Apple Developer certificate, which costs $99/yr), so the first time you open a downloaded copy you'll likely see:
 
-> *"FLUX Studio is damaged and can't be opened. You should move it to the Trash."*
+> *"FLUX Studio" can't be opened because Apple cannot check it for malicious software* (or *"...is from an unidentified developer"*)
 
-You can fix this in 5 seconds:
+To open it: right-click (or Control-click) **FLUX Studio.app** in Applications and choose **Open**, then confirm **Open** in the dialog. You only need to do this once.
+
+If you instead see the older, more alarming *"FLUX Studio is damaged and can't be opened. You should move it to the Trash"* message (this shouldn't happen anymore as of the ad-hoc signing fix, but can still occur on some macOS versions), it's the same quarantine issue and you can fix it in 5 seconds:
 1. Drag **FLUX Studio** to your **Applications** folder.
 2. Open your terminal app (Terminal, iTerm, etc.).
 3. Run the following command to remove the quarantine flag:

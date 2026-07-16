@@ -482,6 +482,41 @@ app.post('/api/deblur', async (req, res) => {
 const TOPAZ_BASE = 'https://api.topazlabs.com/image/v1';
 const getTopazKey = (req) => req.headers['x-topaz-key'];
 
+// Each Topaz model family lives behind a different endpoint — sending the wrong
+// model to /enhance/async (or vice versa) is rejected by Topaz with a 4xx.
+// See https://developer.topazlabs.com/image-api/available-models
+const TOPAZ_ENDPOINT_BY_MODEL = {
+  // Gigapixel — Precision
+  'Standard V2':          'enhance',
+  'Low Resolution V2':    'enhance',
+  'CGI':                  'enhance',
+  'High Fidelity V2':     'enhance',
+  'Text Refine':          'enhance',
+  // Wonder — Generative
+  'Standard MAX':         'enhance-gen',
+  'Wonder 2':             'enhance-gen',
+  'Redefine':             'enhance-gen',
+  'Recover 3':            'enhance-gen',
+  // Bloom — Creative
+  'Bloom':                'enhance-gen',
+  'Bloom Realism':        'enhance-gen',
+  // Special-purpose, own endpoints
+  'Faces':                'restore-gen', // Recover Faces
+  'Transparency Upscale': 'tool',        // Transparent Image Upscale (PNG only)
+};
+
+// Extra per-model fields we forward as-is when present. Topaz's API ignores
+// any key that isn't relevant to the chosen model, so it's safe to always
+// pass whichever of these the client sent.
+const TOPAZ_PASSTHROUGH_FIELDS = [
+  'crop_to_fill', 'subject_detection', 'sharpen', 'denoise', 'fix_compression', 'strength',
+  'deblur_strength', 'denoise_strength', 'decompression_strength', 'opacity',
+  'prompt', 'autoprompt', 'creativity', 'texture', 'detail', 'detail_strength',
+  'enhancement_strength', 'seed', 'face_preservation', 'color_preservation', 'creativity_boost',
+  'grain', 'grain_model', 'grain_strength', 'grain_density', 'grain_size', 'mask_uri',
+  'noise_sigma', 'blur_sigma', 'noise_seed', 'reference_uri',
+];
+
 // Submit async enhance job
 app.post('/api/topaz/enhance', upload.single('image'), async (req, res) => {
   const topazKey = getTopazKey(req);
@@ -504,31 +539,36 @@ app.post('/api/topaz/enhance', upload.single('image'), async (req, res) => {
       return res.status(400).json({ error: 'No image provided (send file as "image" or JSON with "image_url")' });
     }
 
-    // Build multipart form for Topaz
-    const { Blob } = await import('buffer');
-    const formData = new FormData();
-    formData.append('image', new Blob([fileBuffer]), filename);
-    
     // Support body params from either JSON req.body or form req.body
     const model = req.body.model || 'Standard V2';
+    const endpoint = TOPAZ_ENDPOINT_BY_MODEL[model] || 'enhance';
     const output_format = req.body.output_format || 'png';
     const output_width = req.body.output_width;
     const output_height = req.body.output_height;
     const face_enhancement = String(req.body.face_enhancement) === 'true';
-    const face_enhancement_creativity = req.body.face_enhancement_creativity;
 
+    // Build multipart form for Topaz
+    const { Blob } = await import('buffer');
+    const formData = new FormData();
+    formData.append('image', new Blob([fileBuffer]), filename);
     formData.append('model', model);
     formData.append('output_format', output_format);
     if (output_width)  formData.append('output_width', output_width);
     if (output_height) formData.append('output_height', output_height);
+
     if (face_enhancement) {
       formData.append('face_enhancement', 'true');
-      if (face_enhancement_creativity) {
-        formData.append('face_enhancement_creativity', face_enhancement_creativity);
-      }
+      if (req.body.face_enhancement_strength)   formData.append('face_enhancement_strength', req.body.face_enhancement_strength);
+      if (req.body.face_enhancement_creativity) formData.append('face_enhancement_creativity', req.body.face_enhancement_creativity);
     }
 
-    const r = await fetch(`${TOPAZ_BASE}/enhance/async`, {
+    for (const key of TOPAZ_PASSTHROUGH_FIELDS) {
+      const val = req.body[key];
+      if (val === undefined || val === null || val === '') continue;
+      formData.append(key, String(val));
+    }
+
+    const r = await fetch(`${TOPAZ_BASE}/${endpoint}/async`, {
       method: 'POST',
       headers: { 'X-API-KEY': topazKey },
       body: formData,
