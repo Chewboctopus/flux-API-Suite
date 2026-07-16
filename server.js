@@ -618,7 +618,10 @@ app.get('/api/topaz/download/:id', async (req, res) => {
       id: genId,
       tool: 'upscale',
       model: req.query.model || 'Standard V2',
-      cost: 0,
+      // Topaz's API doesn't return a per-job credit cost, so we don't have a
+      // real number to show. Leave this null rather than a fake 0 — every
+      // render site already treats a null/missing cost as "don't display it".
+      cost: null,
       output_format: req.query.fmt || 'png',
       input_url: req.query.input_url || null,
       local_file: localFile,
