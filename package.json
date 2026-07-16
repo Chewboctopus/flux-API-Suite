@@ -1,6 +1,6 @@
 {
   "name": "flux-studio",
-  "version": "2.2.3",
+  "version": "2.2.4",
   "description": "Full-featured local suite for the BFL FLUX API — Generate, Inpaint, Erase, Outpaint, VTO, Deblur",
   "type": "module",
   "main": "electron/main.cjs",
