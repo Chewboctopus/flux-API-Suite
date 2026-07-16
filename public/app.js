@@ -2335,7 +2335,7 @@ document.getElementById('btn-upscale').addEventListener('click', async () => {
       status = resStatus.status;
       progress = resStatus.progress ?? 0;
 
-      const pct = progress ? ` (${Math.round(progress * 100)}%)` : '';
+      const pct = progress ? ` (${Math.round(progress)}%)` : '';
       document.getElementById('upscale-status-text').textContent = `Processing...${pct}`;
 
       if (status === 'Failed' || status === 'Cancelled') {
