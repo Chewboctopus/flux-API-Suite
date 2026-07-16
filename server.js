@@ -478,6 +478,118 @@ app.post('/api/deblur', async (req, res) => {
   } catch (e) { handleError(res, e); }
 });
 
+// ─── Topaz — Upscale / Enhance ───────────────────────────────────────────────
+const TOPAZ_BASE = 'https://api.topazlabs.com/image/v1';
+const getTopazKey = (req) => req.headers['x-topaz-key'];
+
+// Submit async enhance job
+app.post('/api/topaz/enhance', upload.single('image'), async (req, res) => {
+  const topazKey = getTopazKey(req);
+  if (!topazKey) return res.status(401).json({ error: 'Missing Topaz API key' });
+
+  try {
+    let fileBuffer;
+    let filename = 'image.jpg';
+
+    if (req.file) {
+      fileBuffer = readFileSync(req.file.path);
+      filename = req.file.originalname || 'image.jpg';
+    } else if (req.body.image_url) {
+      const imgUrl = req.body.image_url;
+      const b64 = await getB64(imgUrl);
+      if (!b64) return res.status(400).json({ error: 'Could not load image from URL' });
+      fileBuffer = Buffer.from(b64, 'base64');
+      filename = imgUrl.split('/').pop() || 'image.jpg';
+    } else {
+      return res.status(400).json({ error: 'No image provided (send file as "image" or JSON with "image_url")' });
+    }
+
+    // Build multipart form for Topaz
+    const { Blob } = await import('buffer');
+    const formData = new FormData();
+    formData.append('image', new Blob([fileBuffer]), filename);
+    
+    // Support body params from either JSON req.body or form req.body
+    const model = req.body.model || 'Standard V2';
+    const output_format = req.body.output_format || 'png';
+    const output_width = req.body.output_width;
+    const output_height = req.body.output_height;
+    const face_enhancement = String(req.body.face_enhancement) === 'true';
+    const face_enhancement_creativity = req.body.face_enhancement_creativity;
+
+    formData.append('model', model);
+    formData.append('output_format', output_format);
+    if (output_width)  formData.append('output_width', output_width);
+    if (output_height) formData.append('output_height', output_height);
+    if (face_enhancement) {
+      formData.append('face_enhancement', 'true');
+      if (face_enhancement_creativity) {
+        formData.append('face_enhancement_creativity', face_enhancement_creativity);
+      }
+    }
+
+    const r = await fetch(`${TOPAZ_BASE}/enhance/async`, {
+      method: 'POST',
+      headers: { 'X-API-KEY': topazKey },
+      body: formData,
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      return res.status(r.status).json({ error: err.message || err.detail || `Topaz error ${r.status}`, details: err });
+    }
+    const data = await r.json();
+    res.json(data); // { process_id, eta }
+  } catch (e) { handleError(res, e); }
+});
+
+// Poll job status
+app.get('/api/topaz/status/:id', async (req, res) => {
+  const topazKey = getTopazKey(req);
+  if (!topazKey) return res.status(401).json({ error: 'Missing Topaz API key' });
+  try {
+    const r = await fetch(`${TOPAZ_BASE}/status/${req.params.id}`, {
+      headers: { 'X-API-KEY': topazKey },
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      return res.status(r.status).json({ error: err.message || `Topaz status error ${r.status}`, details: err });
+    }
+    res.json(await r.json());
+  } catch (e) { handleError(res, e); }
+});
+
+// Download result + save locally
+app.get('/api/topaz/download/:id', async (req, res) => {
+  const topazKey = getTopazKey(req);
+  if (!topazKey) return res.status(401).json({ error: 'Missing Topaz API key' });
+  try {
+    const r = await fetch(`${TOPAZ_BASE}/download/${req.params.id}`, {
+      headers: { 'X-API-KEY': topazKey },
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      return res.status(r.status).json({ error: err.message || `Topaz download error ${r.status}`, details: err });
+    }
+    const data = await r.json();
+    const genId = makeId('upscale');
+    const localFile = await saveOutput(data.url, genId, req.query.fmt || 'png');
+    
+    const entry = {
+      id: genId,
+      tool: 'upscale',
+      model: req.query.model || 'Standard V2',
+      cost: 0,
+      output_format: req.query.fmt || 'png',
+      input_url: req.query.input_url || null,
+      local_file: localFile,
+      image_url: finalImageUrl(localFile, data.url),
+      timestamp: new Date().toISOString()
+    };
+    appendHistory(entry);
+    res.json(entry);
+  } catch (e) { handleError(res, e); }
+});
+
 // ─── App Config ───────────────────────────────────────────────────────────────
 app.get('/api/config', (_req, res) => {
   try { res.json(JSON.parse(readFileSync(CONFIG_FILE, 'utf8'))); }

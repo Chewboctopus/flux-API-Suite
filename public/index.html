@@ -16,15 +16,21 @@
       <svg width="32" height="32" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="8" fill="currentColor" fill-opacity="0.12"/><path d="M8 16C8 11.6 11.6 8 16 8s8 3.6 8 8-3.6 8-8 8-8-3.6-8-8Z" stroke="currentColor" stroke-width="1.5"/><circle cx="16" cy="16" r="3" fill="currentColor"/></svg>
       <div class="apikey-logo-text">FLUX <span>Studio</span></div>
     </div>
-    <p class="apikey-tagline">Full access to every Black Forest Labs model — Generate, Inpaint, Erase, Outpaint, Virtual Try-On, and Deblur. Runs locally, hits the API directly.</p>
+    <p class="apikey-tagline">Full access to every Black Forest Labs model and Topaz upscaling. Runs locally, hits the APIs directly. Enter at least one key to get started.</p>
     <div class="apikey-form">
-      <label for="input-apikey">BFL API Key</label>
+      <label for="input-apikey">BFL API Key <span class="field-hint">(for Generate, Inpaint, Erase, Outpaint, Try-On, Deblur)</span></label>
       <input type="password" id="input-apikey" placeholder="bfl-xxxxxxxxxxxxxxxxxxxx" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="apikey-divider"></div>
+    <div class="apikey-form">
+      <label for="input-topazkey">Topaz API Key <span class="field-hint">(for Upscale)</span></label>
+      <input type="password" id="input-topazkey" placeholder="your-topaz-api-key" autocomplete="off" spellcheck="false">
+      <p class="apikey-note" style="margin-top:4px;text-align:left">Get a key at <a href="https://account.topazlabs.com/manage-api" target="_blank">account.topazlabs.com</a></p>
     </div>
     <div class="apikey-actions">
       <button class="btn btn-primary btn-full" id="btn-connect">Connect →</button>
     </div>
-    <p class="apikey-note">Key stored in browser only. Never sent to any server except <a href="https://api.bfl.ai" target="_blank">api.bfl.ai</a>.</p>
+    <p class="apikey-note">Keys stored in browser only. Never sent to any server except their respective APIs.</p>
   </div>
 </div>
 
@@ -41,6 +47,7 @@
       <button class="tab-btn" data-tab="outpaint">Outpaint</button>
       <button class="tab-btn" data-tab="vto">Try-On</button>
       <button class="tab-btn" data-tab="deblur">Deblur</button>
+      <button class="tab-btn" data-tab="upscale">Upscale</button>
       <button class="tab-btn" data-tab="history">History</button>
     </nav>
     <div class="topbar-right">
@@ -595,6 +602,99 @@
       </div>
     </div>
 
+    <!-- ─── UPSCALE (Topaz) ──────────────────────────────────────────────── -->
+    <div id="tab-upscale" class="tab-panel">
+      <div class="tool-layout">
+        <aside class="tool-sidebar">
+          <div class="tool-sidebar-inner">
+
+            <div class="section">
+              <div class="section-title">Source Image</div>
+              <div class="upload-zone" id="upscale-upload" style="height:200px">
+                <input type="file" id="upscale-file" accept="image/*">
+                <div class="uz-icon">🖼</div>
+                <div class="uz-text">Drop image or click to browse</div>
+                <div class="uz-hint">PNG, JPG, WebP · max 25MB</div>
+                <img id="upscale-img-preview" style="display:none">
+                <div class="uz-overlay"><span>Change Image</span></div>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Model</div>
+              <div class="field">
+                <select id="upscale-model">
+                  <optgroup label="── Precision ──">
+                    <option value="Standard V2" selected>Standard V2 — General purpose</option>
+                    <option value="Low Resolution V2">Low Resolution V2 — For very small inputs</option>
+                  </optgroup>
+                  <optgroup label="── Generative ──">
+                    <option value="Wonder 2">Wonder 2 — Generative upscaling</option>
+                    <option value="Recover 3">Recover 3 — Restore degraded images</option>
+                  </optgroup>
+                  <optgroup label="── Creative ──">
+                    <option value="Bloom Creative">Bloom Creative — Stylized upscaling (up to 8×)</option>
+                  </optgroup>
+                </select>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Parameters</div>
+              <div class="field">
+                <div class="field-label">Output Format</div>
+                <select id="upscale-format">
+                  <option value="png">PNG</option>
+                  <option value="jpeg">JPEG</option>
+                  <option value="tiff">TIFF</option>
+                </select>
+              </div>
+
+              <div class="field">
+                <div class="field-label">Output Width <span class="field-hint">blank = auto</span></div>
+                <input type="number" id="upscale-width" placeholder="auto" min="1" step="1">
+              </div>
+              <div class="field">
+                <div class="field-label">Output Height <span class="field-hint">blank = auto</span></div>
+                <input type="number" id="upscale-height" placeholder="auto" min="1" step="1">
+              </div>
+
+              <div class="toggle-row">
+                <span class="toggle-label">Face Enhancement</span>
+                <label class="toggle"><input type="checkbox" id="upscale-face"><span class="toggle-slider"></span></label>
+              </div>
+              <div class="field hidden" id="upscale-face-creativity-wrap">
+                <div class="field-label">Face Creativity <span id="upscale-face-val" class="field-hint">0.5</span></div>
+                <input type="range" id="upscale-face-creativity" min="0" max="1" value="0.5" step="0.05">
+              </div>
+            </div>
+
+          </div>
+          <div class="tool-sidebar-footer">
+            <button class="btn btn-primary btn-full" id="btn-upscale">✦ Upscale</button>
+          </div>
+        </aside>
+
+        <div class="tool-main">
+          <div class="status-bar hidden" id="upscale-status">
+            <div class="status-spinner"></div>
+            <span class="status-text" id="upscale-status-text">Upscaling…</span>
+            <span class="status-elapsed" id="upscale-elapsed">0s</span>
+          </div>
+          <div class="results-area" id="upscale-results">
+            <div class="results-placeholder"><div class="ph-icon">🔬</div><p>Upscaled result will appear here</p></div>
+          </div>
+          <div class="upscale-nokey-msg hidden" id="upscale-nokey">
+            <div class="results-placeholder">
+              <div class="ph-icon">🔑</div>
+              <p>Enter your Topaz API key in <strong>Settings</strong> to use Upscale.</p>
+              <p class="apikey-note">Get a key at <a href="https://account.topazlabs.com/manage-api" target="_blank">account.topazlabs.com</a></p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ─── HISTORY ───────────────────────────────────────────────────────── -->
     <div id="tab-history" class="tab-panel">
       <div class="history-layout">
@@ -611,6 +711,7 @@
             <option value="outpaint">Outpaint</option>
             <option value="vto">VTO</option>
             <option value="deblur">Deblur</option>
+            <option value="upscale">Upscale</option>
           </select>
           <input type="text" id="hist-search" placeholder="Search prompts…" style="width:200px;padding:5px 10px;font-size:12px">
           <button class="btn btn-secondary btn-sm" id="hist-refresh">↺ Refresh</button>
@@ -702,6 +803,7 @@
           <button data-sendto="outpaint">📐 Outpaint</button>
           <button data-sendto="vto">👕 Try-On <span class="lb-sendto-hint">person slot</span></button>
           <button data-sendto="deblur">🔍 Deblur</button>
+          <button data-sendto="upscale">🔬 Upscale <span class="lb-sendto-hint">Topaz</span></button>
         </div>
       </div>
       <button class="btn btn-secondary btn-sm" id="lightbox-close">✕ Close</button>
@@ -987,6 +1089,19 @@
         </div>
         <div class="settings-actions">
           <button class="btn btn-primary btn-sm" id="settings-apikey-save">Save API Key</button>
+        </div>
+      </section>
+
+      <!-- ── Topaz API Key ──────────────────────────────────────── -->
+      <section class="settings-section">
+        <div class="settings-section-title">Topaz API Key</div>
+        <p class="settings-desc">Your Topaz Labs API key for upscaling. Stored only in this browser's localStorage. <a href="https://account.topazlabs.com/manage-api" target="_blank">Get a key →</a></p>
+        <div class="settings-row">
+          <input type="password" id="settings-topazkey" class="settings-input" placeholder="Enter your Topaz API key" autocomplete="off" spellcheck="false">
+          <button class="btn btn-secondary btn-sm" id="settings-topazkey-reveal" title="Show / hide key">👁</button>
+        </div>
+        <div class="settings-actions">
+          <button class="btn btn-primary btn-sm" id="settings-topazkey-save">Save Topaz Key</button>
         </div>
       </section>
 

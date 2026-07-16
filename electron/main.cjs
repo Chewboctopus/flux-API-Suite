@@ -330,19 +330,29 @@ function buildMenu() {
 }
 
 // ── Auto-update (GitHub Releases via electron-builder's publish config) ───────
-// Note: macOS builds are currently unsigned (CSC_IDENTITY_AUTO_DISCOVERY is
-// disabled in CI because there's no Apple Developer ID cert). Squirrel.Mac
-// generally needs a signed, notarized app to apply updates reliably under
-// Gatekeeper — so auto-update is expected to work on Windows/Linux now, but
-// may silently fail to apply on macOS until the build is signed. It's safe to
-// leave enabled either way: it just won't find/apply anything on mac.
+// macOS builds are unsigned but auto-update works via the zip target
+// (electron-updater handles zip extraction natively, no code signing needed).
 function initAutoUpdate() {
   if (IS_DEV) return;
   autoUpdater.autoDownload = true;
   autoUpdater.on('error', (e) => console.error('[AutoUpdate] error:', e?.message || e));
-  autoUpdater.on('update-available', (info) => console.log('[AutoUpdate] update available:', info?.version));
+  autoUpdater.on('update-available', (info) => {
+    console.log('[AutoUpdate] update available:', info?.version);
+  });
   autoUpdater.on('update-downloaded', (info) => {
-    console.log('[AutoUpdate] downloaded, will install on quit:', info?.version);
+    console.log('[AutoUpdate] downloaded:', info?.version);
+    const version = info?.version || 'new version';
+    dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Update Ready',
+      message: `FLUX Studio v${version} has been downloaded.`,
+      detail: 'The update will be installed when you restart the app.',
+      buttons: ['Restart Now', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
+    }).then(({ response }) => {
+      if (response === 0) autoUpdater.quitAndInstall();
+    });
   });
   autoUpdater.checkForUpdatesAndNotify().catch((e) =>
     console.error('[AutoUpdate] check failed:', e?.message || e)

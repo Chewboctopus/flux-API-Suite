@@ -5,6 +5,7 @@
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let API_KEY = localStorage.getItem('flux_api_key') || '';
+let TOPAZ_KEY = localStorage.getItem('topaz_api_key') || '';
 
 // ─── Toast ───────────────────────────────────────────────────────────────────
 function toast(msg, type = 'info', duration = 4000) {
@@ -34,7 +35,31 @@ async function apiFetch(path, body) {
 }
 
 async function apiGet(path) {
-  const res = await fetch(path, { headers: { 'x-key': API_KEY } });
+  // Use either API_KEY or TOPAZ_KEY to authenticate local requests like history or paths
+  const authKey = API_KEY || TOPAZ_KEY;
+  const res = await fetch(path, { headers: { 'x-key': authKey } });
+  let data;
+  try { data = await res.json(); }
+  catch { throw new Error(`Server error ${res.status} — unexpected response format`); }
+  if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
+  return data;
+}
+
+async function topazFetch(path, body) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-topaz-key': TOPAZ_KEY },
+    body: JSON.stringify(body),
+  });
+  let data;
+  try { data = await res.json(); }
+  catch { throw new Error(`Server error ${res.status} — unexpected response format`); }
+  if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+  return data;
+}
+
+async function topazGet(path) {
+  const res = await fetch(path, { headers: { 'x-topaz-key': TOPAZ_KEY } });
   let data;
   try { data = await res.json(); }
   catch { throw new Error(`Server error ${res.status} — unexpected response format`); }
@@ -489,6 +514,7 @@ function buildResultCard(entry, onSendInpaint, onSendGenerate) {
             <button data-sendto="outpaint">📐 Outpaint</button>
             <button data-sendto="vto">👕 Try-On</button>
             <button data-sendto="deblur">🔍 Deblur</button>
+            <button data-sendto="upscale">🔬 Upscale <span class="lb-sendto-hint">Topaz</span></button>
           </div>
         </div>
       </div>
@@ -965,6 +991,7 @@ function sendToTool(tool, imageUrl, entry) {
     outpaint: () => { switchTab('outpaint'); setTimeout(() => outpaintUZ.setFromUrl(imageUrl), 120); },
     vto:      () => { switchTab('vto');      setTimeout(() => vtoPersonUZ.setFromUrl(imageUrl), 120); },
     deblur:   () => { switchTab('deblur');   setTimeout(() => deblurUZ.setFromUrl(imageUrl),  120); },
+    upscale:  () => { switchTab('upscale');  setTimeout(() => upscaleUZ.setFromUrl(imageUrl), 120); },
   };
 
   if (actions[tool]) {
@@ -1102,33 +1129,92 @@ async function seedSessionCostFromHistory() {
 
 
 
+function updateTabAvailability() {
+  const upscaleSidebar = document.querySelector('#tab-upscale .tool-sidebar');
+  const upscaleResults = document.querySelector('#tab-upscale .tool-main #upscale-results');
+  const upscaleStatusBar = document.querySelector('#tab-upscale .tool-main .status-bar');
+  const upscaleNoKey = document.getElementById('upscale-nokey');
+
+  if (TOPAZ_KEY) {
+    upscaleSidebar?.classList.remove('hidden');
+    upscaleResults?.classList.remove('hidden');
+    upscaleNoKey?.classList.add('hidden');
+  } else {
+    upscaleSidebar?.classList.add('hidden');
+    upscaleResults?.classList.add('hidden');
+    upscaleStatusBar?.classList.add('hidden');
+    upscaleNoKey?.classList.remove('hidden');
+  }
+
+  // Check BFL tabs
+  const bflTabs = ['generate', 'inpaint', 'erase', 'outpaint', 'vto', 'deblur'];
+  bflTabs.forEach(tab => {
+    const btn = document.getElementById(tab === 'vto' ? 'btn-vto' : (tab === 'generate' ? 'btn-generate' : `btn-${tab}`));
+    if (btn) {
+      if (API_KEY) {
+        btn.disabled = false;
+        btn.title = '';
+      } else {
+        btn.disabled = true;
+        btn.title = 'BFL API Key is required for this tool';
+      }
+    }
+  });
+
+  // Show/hide credit badge depending on BFL key
+  const creditBadge = document.getElementById('credit-badge');
+  if (creditBadge) {
+    creditBadge.style.display = API_KEY ? '' : 'none';
+  }
+}
+
 document.getElementById('btn-connect').addEventListener('click', () => {
   const key = document.getElementById('input-apikey').value.trim();
-  if (!key) { toast('Enter your BFL API key', 'warn'); return; }
+  const topazKey = document.getElementById('input-topazkey').value.trim();
+  if (!key && !topazKey) { toast('Enter at least one API key to connect', 'warn'); return; }
+  
   API_KEY = key;
-  localStorage.setItem('flux_api_key', key);
+  TOPAZ_KEY = topazKey;
+  
+  if (key) localStorage.setItem('flux_api_key', key);
+  else localStorage.removeItem('flux_api_key');
+  
+  if (topazKey) localStorage.setItem('topaz_api_key', topazKey);
+  else localStorage.removeItem('topaz_api_key');
+  
   document.getElementById('screen-apikey').classList.remove('active');
   document.getElementById('screen-app').classList.add('active');
-  loadCredits();
+  
+  if (API_KEY) {
+    loadCredits();
+  }
   seedSessionCostFromHistory();
   setTimeout(maybeShowWelcome, 700); // show welcome on first connect
+  updateTabAvailability();
 });
 
 document.getElementById('input-apikey').addEventListener('keydown', e => {
   if (e.key === 'Enter') document.getElementById('btn-connect').click();
 });
+document.getElementById('input-topazkey').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('btn-connect').click();
+});
 
 document.getElementById('btn-changekey').addEventListener('click', () => {
   API_KEY = '';
+  TOPAZ_KEY = '';
   localStorage.removeItem('flux_api_key');
+  localStorage.removeItem('topaz_api_key');
   document.getElementById('screen-app').classList.remove('active');
   document.getElementById('screen-apikey').classList.add('active');
   document.getElementById('input-apikey').value = '';
+  document.getElementById('input-topazkey').value = '';
 });
 
-// Auto-login if key stored
-if (API_KEY) {
+// Auto-login if either key stored
+if (API_KEY || TOPAZ_KEY) {
   document.getElementById('input-apikey').value = API_KEY;
+  document.getElementById('input-topazkey').value = TOPAZ_KEY;
   document.getElementById('btn-connect').click();
 }
 
@@ -2089,6 +2175,93 @@ document.getElementById('btn-deblur').addEventListener('click', async () => {
 
 
 
+// ─── UPSCALE (Topaz) tab ──────────────────────────────────────────────────────
+const upscaleUZ = new UploadZone('upscale-upload', 'upscale-file', 'upscale-img-preview');
+
+// Show/hide face creativity slider based on face enhancement checkbox
+document.getElementById('upscale-face').addEventListener('change', (e) => {
+  const wrap = document.getElementById('upscale-face-creativity-wrap');
+  if (e.target.checked) wrap.classList.remove('hidden');
+  else                   wrap.classList.add('hidden');
+});
+
+document.getElementById('upscale-face-creativity').addEventListener('input', (e) => {
+  document.getElementById('upscale-face-val').textContent = e.target.value;
+});
+
+document.getElementById('btn-upscale').addEventListener('click', async () => {
+  if (!upscaleUZ.url) { toast('Upload an image first', 'warn'); return; }
+
+  const btn = document.getElementById('btn-upscale');
+  btn.disabled = true;
+  showStatus('upscale-status', 'upscale-status-text', 'Submitting to Topaz...');
+  const stopTimer = startTimer(document.getElementById('upscale-elapsed'));
+
+  try {
+    const model = document.getElementById('upscale-model').value;
+    const format = document.getElementById('upscale-format').value;
+    const width = document.getElementById('upscale-width').value.trim();
+    const height = document.getElementById('upscale-height').value.trim();
+    const face = document.getElementById('upscale-face').checked;
+    const faceCreativity = document.getElementById('upscale-face-creativity').value;
+
+    const payload = {
+      image_url: upscaleUZ.url,
+      model,
+      output_format: format,
+    };
+    if (width)  payload.output_width = Number(width);
+    if (height) payload.output_height = Number(height);
+    if (face) {
+      payload.face_enhancement = true;
+      payload.face_enhancement_creativity = Number(faceCreativity);
+    }
+
+    // Submit async job
+    const resSubmit = await topazFetch('/api/topaz/enhance', payload);
+    const processId = resSubmit.process_id;
+    if (!processId) throw new Error('Topaz did not return a process_id');
+
+    // Poll for status
+    let status = 'Pending';
+    let progress = 0;
+    while (status !== 'Completed') {
+      await new Promise(r => setTimeout(r, 2000));
+      const resStatus = await topazGet(`/api/topaz/status/${processId}`);
+      status = resStatus.status;
+      progress = resStatus.progress ?? 0;
+      
+      const pct = progress ? ` (${Math.round(progress * 100)}%)` : '';
+      document.getElementById('upscale-status-text').textContent = `Processing...${pct}`;
+
+      if (status === 'Failed' || status === 'Cancelled') {
+        throw new Error(`Topaz job ended with status: ${status}`);
+      }
+    }
+
+    // Download the completed result
+    document.getElementById('upscale-status-text').textContent = 'Saving result...';
+    const params = new URLSearchParams({
+      fmt: format,
+      model,
+      input_url: upscaleUZ.url
+    });
+    const entry = await topazGet(`/api/topaz/download/${processId}?${params.toString()}`);
+    
+    renderSingleResult('upscale-results', entry);
+    if (entry._refPreviewUrl == null && upscaleUZ.objUrl) entry._refPreviewUrl = upscaleUZ.objUrl;
+    toast('Upscale complete!', 'success');
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    stopTimer();
+    hideStatus('upscale-status');
+    btn.disabled = false;
+  }
+});
+
+
+
 // ─── Single-result renderer ───────────────────────────────────────────────────
 function renderSingleResult(containerId, entry) {
   const container = document.getElementById(containerId);
@@ -2177,6 +2350,7 @@ function renderHistory() {
               <button data-sendto="outpaint">📐 Outpaint</button>
               <button data-sendto="vto">👕 Try-On</button>
               <button data-sendto="deblur">🔍 Deblur</button>
+              <button data-sendto="upscale">🔬 Upscale <span class="lb-sendto-hint">Topaz</span></button>
             </div>
           </div>
         </div>
@@ -2405,6 +2579,7 @@ async function _routePasteFile(file) {
     erase:    eraseUZ,
     outpaint: outpaintUZ,
     deblur:   deblurUZ,
+    upscale:  upscaleUZ,
   };
   const uz = uzMap[tab];
   if (uz) {
@@ -2534,6 +2709,13 @@ async function openSettings() {
   keyInput.type  = 'password';
   document.getElementById('settings-apikey-reveal').textContent = '👁';
 
+  const topazKeyInput = document.getElementById('settings-topazkey');
+  if (topazKeyInput) {
+    topazKeyInput.value = localStorage.getItem('topaz_api_key') || '';
+    topazKeyInput.type  = 'password';
+    document.getElementById('settings-topazkey-reveal').textContent = '👁';
+  }
+
   // Load current port config
   try {
     const cfg = await apiGet('/api/config');
@@ -2599,22 +2781,37 @@ async function saveSettings() {
 document.getElementById('settings-apikey-save').addEventListener('click', () => {
   const keyInput = document.getElementById('settings-apikey');
   const key = keyInput.value.trim();
-  if (!key) {
-    toast('Enter a valid API key', 'warn'); return;
-  }
   API_KEY = key;
-  localStorage.setItem('flux_api_key', key);
+  if (key) localStorage.setItem('flux_api_key', key);
+  else localStorage.removeItem('flux_api_key');
   loadCredits();
-  toast('✓ API key updated', 'success');
-  // Make sure we're on the app screen
-  document.getElementById('screen-apikey').classList.remove('active');
-  document.getElementById('screen-app').classList.add('active');
+  toast('✓ BFL API key updated', 'success');
+  updateTabAvailability();
 });
 
 // API key reveal toggle
 document.getElementById('settings-apikey-reveal').addEventListener('click', () => {
   const inp = document.getElementById('settings-apikey');
   const btn = document.getElementById('settings-apikey-reveal');
+  if (inp.type === 'password') { inp.type = 'text'; btn.textContent = '🙈'; }
+  else                         { inp.type = 'password'; btn.textContent = '👁'; }
+});
+
+// Topaz key save
+document.getElementById('settings-topazkey-save')?.addEventListener('click', () => {
+  const keyInput = document.getElementById('settings-topazkey');
+  const key = keyInput.value.trim();
+  TOPAZ_KEY = key;
+  if (key) localStorage.setItem('topaz_api_key', key);
+  else localStorage.removeItem('topaz_api_key');
+  toast('✓ Topaz API key updated', 'success');
+  updateTabAvailability();
+});
+
+// Topaz key reveal toggle
+document.getElementById('settings-topazkey-reveal')?.addEventListener('click', () => {
+  const inp = document.getElementById('settings-topazkey');
+  const btn = document.getElementById('settings-topazkey-reveal');
   if (inp.type === 'password') { inp.type = 'text'; btn.textContent = '🙈'; }
   else                         { inp.type = 'password'; btn.textContent = '👁'; }
 });

@@ -87,6 +87,7 @@ body {
 .apikey-actions { display: flex; flex-direction: column; gap: 8px; }
 .apikey-note { font-size: 11px; color: var(--text-secondary); text-align: center; }
 .apikey-note a { color: var(--accent-text); text-decoration: none; }
+.apikey-divider { height: 1px; background: var(--border); margin: 4px 0; }
 
 /* ─── Topbar ─────────────────────────────────────────────────────────────── */
 #screen-app { display: none; flex-direction: column; height: 100%; }
