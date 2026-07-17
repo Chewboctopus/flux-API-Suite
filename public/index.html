@@ -658,11 +658,24 @@
                 </select>
               </div>
 
-              <div class="field" id="upscale-width-wrap">
+              <div class="field" id="upscale-scale-wrap">
+                <div class="field-label">Output Size</div>
+                <select id="upscale-scale">
+                  <option value="auto" selected>Auto — let Topaz decide</option>
+                  <option value="1">1× — same size</option>
+                  <option value="2">2×</option>
+                  <option value="4">4×</option>
+                  <option value="8" id="upscale-scale-8x-opt">8×</option>
+                  <option value="custom">Custom…</option>
+                </select>
+                <div class="field-hint" id="upscale-scale-hint" style="margin-top:4px">Upload an image to see computed size</div>
+              </div>
+
+              <div class="field hidden" id="upscale-width-wrap">
                 <div class="field-label">Output Width <span class="field-hint">blank = auto</span></div>
                 <input type="number" id="upscale-width" placeholder="auto" min="1" step="1">
               </div>
-              <div class="field" id="upscale-height-wrap">
+              <div class="field hidden" id="upscale-height-wrap">
                 <div class="field-label">Output Height <span class="field-hint">blank = auto</span></div>
                 <input type="number" id="upscale-height" placeholder="auto" min="1" step="1">
               </div>

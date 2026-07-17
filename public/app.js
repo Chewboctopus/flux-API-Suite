@@ -2185,19 +2185,27 @@ const upscaleUZ = new UploadZone('upscale-upload', 'upscale-file', 'upscale-img-
 // faces       = Recover Faces (restore-gen/async) — its own tiny param set
 // transparent = Transparent Image Upscale (tool/async) — PNG only, no face/sharpen/denoise
 const UPSCALE_TIER_VISIBILITY = {
-  precision:   ['format', 'width', 'height', 'crop', 'subject', 'face', 'sharpen', 'denoise'],
-  generative:  ['format', 'width', 'height', 'crop', 'subject', 'face', 'sharpen', 'denoise', 'gen'],
-  creative:    ['format', 'width', 'height', 'crop', 'subject', 'face', 'sharpen', 'denoise', 'gen'],
+  precision:   ['format', 'scale', 'crop', 'subject', 'face', 'sharpen', 'denoise'],
+  generative:  ['format', 'scale', 'crop', 'subject', 'face', 'sharpen', 'denoise', 'gen'],
+  creative:    ['format', 'scale', 'crop', 'subject', 'face', 'sharpen', 'denoise', 'gen'],
   faces:       ['format', 'faces'],
-  transparent: ['width', 'height', 'crop'],
+  transparent: ['scale', 'crop'],
 };
 
 const UPSCALE_WRAP_IDS = {
-  format: 'upscale-format-wrap', width: 'upscale-width-wrap', height: 'upscale-height-wrap',
+  format: 'upscale-format-wrap', scale: 'upscale-scale-wrap',
+  width: 'upscale-width-wrap', height: 'upscale-height-wrap',
   crop: 'upscale-crop-wrap', subject: 'upscale-subject-wrap', face: 'upscale-face-wrap',
   sharpen: 'upscale-sharpen-wrap', denoise: 'upscale-denoise-wrap', gen: 'upscale-gen-section',
   faces: 'upscale-faces-section',
 };
+
+// Detected natural size of whatever's currently loaded into the Upscale
+// source image — used to compute 2x/4x/8x output sizes instead of making
+// the user guess numbers.
+let _upscaleImgNW = null;
+let _upscaleImgNH = null;
+const UPSCALE_MAX_DIM = 32000; // Topaz's hard per-side cap, all models
 
 function applyUpscaleTier() {
   const sel = document.getElementById('upscale-model');
@@ -2222,9 +2230,79 @@ function applyUpscaleTier() {
   if (tier === 'transparent') {
     document.getElementById('upscale-format').value = 'png';
   }
+
+  applyUpscaleScaleMode();
+}
+
+// Compute/display the effective output size for the current scale-mode
+// selection, and show/hide the manual width/height fields (only shown for
+// "Custom"). Mirrors the DaVinci Resolve Topaz script's approach: default to
+// a multiple of the detected source resolution instead of raw numbers.
+function applyUpscaleScaleMode() {
+  const scaleWrap = document.getElementById('upscale-scale-wrap');
+  const widthWrap = document.getElementById('upscale-width-wrap');
+  const heightWrap = document.getElementById('upscale-height-wrap');
+  const hint = document.getElementById('upscale-scale-hint');
+  const scaleMode = document.getElementById('upscale-scale').value;
+  const scaleControlVisible = !scaleWrap.classList.contains('hidden');
+
+  if (!scaleControlVisible) {
+    widthWrap.classList.add('hidden');
+    heightWrap.classList.add('hidden');
+    return;
+  }
+
+  if (scaleMode === 'custom') {
+    widthWrap.classList.remove('hidden');
+    heightWrap.classList.remove('hidden');
+    hint.textContent = '';
+    return;
+  }
+
+  // Auto / 1x / 2x / 4x / 8x — manual fields stay hidden, computed here instead
+  widthWrap.classList.add('hidden');
+  heightWrap.classList.add('hidden');
+
+  if (scaleMode === 'auto') {
+    document.getElementById('upscale-width').value = '';
+    document.getElementById('upscale-height').value = '';
+    hint.textContent = 'Topaz will choose the best output size for this model.';
+    return;
+  }
+
+  if (!_upscaleImgNW || !_upscaleImgNH) {
+    hint.textContent = 'Upload an image to see computed size';
+    return;
+  }
+
+  const mult = Number(scaleMode);
+  let outW = Math.round(_upscaleImgNW * mult);
+  let outH = Math.round(_upscaleImgNH * mult);
+  if (outW > UPSCALE_MAX_DIM || outH > UPSCALE_MAX_DIM) {
+    const clampRatio = UPSCALE_MAX_DIM / Math.max(outW, outH);
+    outW = Math.round(outW * clampRatio);
+    outH = Math.round(outH * clampRatio);
+    hint.textContent = `${outW} × ${outH} (clamped to Topaz's ${UPSCALE_MAX_DIM}px max)`;
+  } else {
+    hint.textContent = `${outW} × ${outH}`;
+  }
+  document.getElementById('upscale-width').value = outW;
+  document.getElementById('upscale-height').value = outH;
 }
 
 document.getElementById('upscale-model').addEventListener('change', applyUpscaleTier);
+document.getElementById('upscale-scale').addEventListener('change', applyUpscaleScaleMode);
+
+upscaleUZ.onChange = () => {
+  const img = new Image();
+  img.onload = () => {
+    _upscaleImgNW = img.naturalWidth;
+    _upscaleImgNH = img.naturalHeight;
+    applyUpscaleScaleMode();
+  };
+  img.src = upscaleUZ.objUrl || upscaleUZ.url;
+};
+
 applyUpscaleTier();
 
 // Show/hide face strength+creativity sliders based on face enhancement checkbox
@@ -2277,12 +2355,14 @@ document.getElementById('btn-upscale').addEventListener('click', async () => {
 
     const isVisible = (id) => !document.getElementById(id).classList.contains('hidden');
 
-    if (isVisible('upscale-width-wrap')) {
+    // Width/height inputs are hidden for every scale mode except "Custom" —
+    // for the preset multipliers, applyUpscaleScaleMode() already computed
+    // and stored the values in these same inputs, so reading .value works
+    // regardless of whether the wrap div is currently shown.
+    if (isVisible('upscale-scale-wrap')) {
       const width = document.getElementById('upscale-width').value.trim();
-      if (width) payload.output_width = Number(width);
-    }
-    if (isVisible('upscale-height-wrap')) {
       const height = document.getElementById('upscale-height').value.trim();
+      if (width)  payload.output_width = Number(width);
       if (height) payload.output_height = Number(height);
     }
     if (isVisible('upscale-crop-wrap') && document.getElementById('upscale-crop').checked) {
@@ -2326,12 +2406,34 @@ document.getElementById('btn-upscale').addEventListener('click', async () => {
     const processId = resSubmit.process_id;
     if (!processId) throw new Error('Topaz did not return a process_id');
 
-    // Poll for status
+    // Poll for status. A single flaky network blip here used to kill the
+    // whole job (Topaz would still be processing fine on their end) — now we
+    // tolerate a few consecutive failed poll attempts before giving up, and
+    // give up cleanly after a stall timeout instead of polling forever.
     let status = 'Pending';
     let progress = 0;
+    let consecutiveErrors = 0;
+    let lastProgress = -1;
+    let pollsSinceProgress = 0;
+    const MAX_CONSECUTIVE_ERRORS = 5;
+    const STALL_TIMEOUT_POLLS = 150; // 150 * 2s = 5 minutes with no progress change
+
     while (status !== 'Completed') {
       await new Promise(r => setTimeout(r, 2000));
-      const resStatus = await topazGet(`/api/topaz/status/${processId}`);
+
+      let resStatus;
+      try {
+        resStatus = await topazGet(`/api/topaz/status/${processId}`);
+        consecutiveErrors = 0;
+      } catch (e) {
+        consecutiveErrors++;
+        if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+          throw new Error(`Lost connection to Topaz while checking job status (process ID: ${processId}): ${e.message}`);
+        }
+        document.getElementById('upscale-status-text').textContent = `Connection hiccup, retrying... (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS})`;
+        continue;
+      }
+
       status = resStatus.status;
       progress = resStatus.progress ?? 0;
 
@@ -2340,6 +2442,16 @@ document.getElementById('btn-upscale').addEventListener('click', async () => {
 
       if (status === 'Failed' || status === 'Cancelled') {
         throw new Error(`Topaz job ended with status: ${status}`);
+      }
+
+      if (progress !== lastProgress) {
+        lastProgress = progress;
+        pollsSinceProgress = 0;
+      } else {
+        pollsSinceProgress++;
+        if (pollsSinceProgress >= STALL_TIMEOUT_POLLS) {
+          throw new Error(`Topaz job stalled at ${Math.round(progress)}% for 5+ minutes (process ID: ${processId}). It may still finish — check your Topaz account, or try again.`);
+        }
       }
     }
 

@@ -611,9 +611,28 @@ app.get('/api/topaz/download/:id', async (req, res) => {
       return res.status(r.status).json({ error: err.message || `Topaz download error ${r.status}`, details: err });
     }
     const data = await r.json();
+    // Topaz's Download response is { download_url, head_url, expiry } — there
+    // is no "url" field. Reading data.url (as this used to) is always
+    // undefined, so the image never actually saves and the result card
+    // renders with no image.
+    const downloadUrl = data.download_url;
+    if (!downloadUrl) {
+      return res.status(502).json({ error: 'Topaz did not return a download URL', details: data });
+    }
+
     const genId = makeId('upscale');
-    const localFile = await saveOutput(data.url, genId, req.query.fmt || 'png');
-    
+    // Presigned download URLs can occasionally hiccup transiently — retry a
+    // couple of times before giving up, and fail loudly (rather than
+    // returning a result entry with a broken image) if it never succeeds.
+    let localFile = null;
+    for (let attempt = 0; attempt < 3 && !localFile; attempt++) {
+      if (attempt > 0) await new Promise(r2 => setTimeout(r2, 1000 * attempt));
+      localFile = await saveOutput(downloadUrl, genId, req.query.fmt || 'png');
+    }
+    if (!localFile) {
+      return res.status(502).json({ error: 'Failed to download the processed image from Topaz after 3 attempts' });
+    }
+
     const entry = {
       id: genId,
       tool: 'upscale',
@@ -625,7 +644,7 @@ app.get('/api/topaz/download/:id', async (req, res) => {
       output_format: req.query.fmt || 'png',
       input_url: req.query.input_url || null,
       local_file: localFile,
-      image_url: finalImageUrl(localFile, data.url),
+      image_url: finalImageUrl(localFile, downloadUrl),
       timestamp: new Date().toISOString()
     };
     appendHistory(entry);
