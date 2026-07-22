@@ -1970,12 +1970,22 @@ function _opComputeBox() {
   const srcH = _outpaintImgNH || Math.round(H * 0.6);
   const fit  = Math.min(W / srcW, H / srcH);         // scale that fits source in frame
   const k    = fit * (_opSizePct / 100);
-  const sw   = Math.max(1, Math.round(srcW * k));
-  const sh   = Math.max(1, Math.round(srcH * k));
+  
+  // Snap source size to 16px grid (BFL API requires 16px alignment for outpainting)
+  const rawSw = Math.max(16, Math.round(srcW * k));
+  const rawSh = Math.max(16, Math.round(srcH * k));
+  const sw = Math.round(rawSw / 16) * 16;
+  const sh = Math.round(rawSh / 16) * 16;
+
   const freeX = Math.max(0, W - sw);
   const freeY = Math.max(0, H - sh);
-  const ox = Math.round(freeX * _opPosFracX);
-  const oy = Math.round(freeY * _opPosFracY);
+
+  // Snap offsets to 16px grid to ensure perfect alignment in the model tensor
+  const rawOx = Math.round(freeX * _opPosFracX);
+  const rawOy = Math.round(freeY * _opPosFracY);
+  const ox = Math.round(rawOx / 16) * 16;
+  const oy = Math.round(rawOy / 16) * 16;
+
   return { W, H, sw, sh, ox, oy, freeX, freeY };
 }
 
