@@ -413,20 +413,34 @@
 
             <div class="section">
               <div class="section-title">Source Placement</div>
-              <div class="offset-grid">
-                <div class="field">
-                  <div class="field-label">Offset X <span class="field-hint">px, null=center</span></div>
-                  <input type="number" id="op-offset-x" placeholder="center">
-                </div>
-                <div class="field">
-                  <div class="field-label">Offset Y <span class="field-hint">px, null=center</span></div>
-                  <input type="number" id="op-offset-y" placeholder="center">
-                </div>
+
+              <!-- Relative size of the source within the target frame -->
+              <div class="field">
+                <div class="field-label">Source size <span class="field-hint" id="op-size-val">100%</span></div>
+                <input type="range" id="op-size-slider" min="10" max="100" value="100" step="1" style="width:100%">
               </div>
-              <button class="btn btn-secondary btn-sm" id="op-center-btn">⊕ Center source image</button>
+
+              <!-- Interactive placement: drag the source inside the target frame -->
               <div style="background:var(--bg-input);border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden;margin-top:6px">
-                <canvas id="op-preview-canvas" style="width:100%;display:block"></canvas>
+                <canvas id="op-preview-canvas" style="width:100%;display:block;cursor:grab;touch-action:none"></canvas>
               </div>
+              <div class="field-hint" style="margin-top:5px;text-align:center">Drag the source to reposition · slider resizes it · outpaint fills the rest</div>
+
+              <button class="btn btn-secondary btn-sm" id="op-center-btn" style="margin-top:8px">⊕ Center source image</button>
+
+              <details style="margin-top:8px">
+                <summary class="field-hint" style="cursor:pointer">Precise offset (px)</summary>
+                <div class="offset-grid" style="margin-top:6px">
+                  <div class="field">
+                    <div class="field-label">Offset X</div>
+                    <input type="number" id="op-offset-x" placeholder="center">
+                  </div>
+                  <div class="field">
+                    <div class="field-label">Offset Y</div>
+                    <input type="number" id="op-offset-y" placeholder="center">
+                  </div>
+                </div>
+              </details>
             </div>
 
             <div class="section">

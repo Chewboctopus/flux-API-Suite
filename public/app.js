@@ -1950,6 +1950,35 @@ let _outpaintImgNW = 0, _outpaintImgNH = 0;
 let _opArLocked = false;
 let _opLockedRatio = null; // W/H
 
+// Interactive placement state (normalized so it survives frame/size changes):
+//   _opSizePct  — source size as a % of "fit to frame" (100% = touches frame edges)
+//   _opPosFracX/Y — source top-left position within the free space, 0..1 (0.5 = centered)
+//   _opSrcImg   — the loaded source <img> for drawing the live preview
+let _opSizePct  = 100;
+let _opPosFracX = 0.5, _opPosFracY = 0.5;
+let _opSrcImg   = null;
+// Drag state for the placement canvas
+let _opDragging = false, _opDragDX = 0, _opDragDY = 0;
+
+// Given the current frame (W×H) and slider %, compute the source's output-pixel
+// box {sw, sh, ox, oy} placed inside the frame. Everything downstream (preview,
+// submit) derives from this single source of truth.
+function _opComputeBox() {
+  const W = Number(_opWEl().value) || 1;
+  const H = Number(_opHEl().value) || 1;
+  const srcW = _outpaintImgNW || Math.round(W * 0.6);
+  const srcH = _outpaintImgNH || Math.round(H * 0.6);
+  const fit  = Math.min(W / srcW, H / srcH);         // scale that fits source in frame
+  const k    = fit * (_opSizePct / 100);
+  const sw   = Math.max(1, Math.round(srcW * k));
+  const sh   = Math.max(1, Math.round(srcH * k));
+  const freeX = Math.max(0, W - sw);
+  const freeY = Math.max(0, H - sh);
+  const ox = Math.round(freeX * _opPosFracX);
+  const oy = Math.round(freeY * _opPosFracY);
+  return { W, H, sw, sh, ox, oy, freeX, freeY };
+}
+
 const _opWEl = () => document.getElementById('op-width');
 const _opHEl = () => document.getElementById('op-height');
 
@@ -2065,6 +2094,12 @@ outpaintUZ.onChange = (objUrl, serverUrl) => {
   img.onload = () => {
     _outpaintImgNW = img.naturalWidth;
     _outpaintImgNH = img.naturalHeight;
+    _opSrcImg   = img;              // keep for live preview drawing
+    _opSizePct  = 100;             // reset placement for the new image
+    _opPosFracX = 0.5; _opPosFracY = 0.5;
+    const slider = document.getElementById('op-size-slider');
+    if (slider) slider.value = 100;
+    document.getElementById('op-size-val').textContent = '100%';
     // Default: expand width by 50%, keep height
     _opSetWH(Math.round(_outpaintImgNW * 1.5), _outpaintImgNH);
     // Show source-match quick buttons
@@ -2079,53 +2114,123 @@ outpaintUZ.onChange = (objUrl, serverUrl) => {
   img.src = objUrl || serverUrl;
 };
 
+const _opCanvas = document.getElementById('op-preview-canvas');
+
 function updateOutpaintPreview() {
-  const canvas = document.getElementById('op-preview-canvas');
-  const W = Number(document.getElementById('op-width').value)  || 1024;
-  const H = Number(document.getElementById('op-height').value) || 1024;
-  const ox = document.getElementById('op-offset-x').value === '' ? null : Number(document.getElementById('op-offset-x').value);
-  const oy = document.getElementById('op-offset-y').value === '' ? null : Number(document.getElementById('op-offset-y').value);
+  const { W, H, sw, sh, ox, oy } = _opComputeBox();
 
-  const displayW = 300, displayH = Math.round(displayW * H / W);
-  canvas.width = displayW; canvas.height = displayH;
-  const ctx = canvas.getContext('2d');
+  // Display canvas sized to the frame's aspect ratio (fit within a fixed width).
+  const displayW = 300, displayH = Math.max(1, Math.round(displayW * H / W));
+  _opCanvas.width = displayW; _opCanvas.height = displayH;
+  const ctx = _opCanvas.getContext('2d');
+  const s = displayW / W; // output px → display px
+  const dx = ox * s, dy = oy * s, dw = sw * s, dh = sh * s;
+
   ctx.clearRect(0, 0, displayW, displayH);
-
-  const scale = displayW / W;
-  const imgW = (_outpaintImgNW || W * 0.6) * scale;
-  const imgH = (_outpaintImgNH || H * 0.6) * scale;
-  const x = ox !== null ? ox * scale : (displayW - imgW) / 2;
-  const y = oy !== null ? oy * scale : (displayH - imgH) / 2;
-
-  // Draw canvas bg
-  ctx.fillStyle = 'rgba(255,255,255,0.03)';
+  // Frame background = the outpaint region
+  ctx.fillStyle = 'rgba(120,140,200,0.10)';
   ctx.fillRect(0, 0, displayW, displayH);
 
-  // Draw image placeholder
-  ctx.fillStyle = 'rgba(232,160,32,0.3)';
-  ctx.strokeStyle = 'rgba(232,160,32,0.6)';
-  ctx.lineWidth = 1;
-  ctx.fillRect(x, y, imgW, imgH);
-  ctx.strokeRect(x, y, imgW, imgH);
-  ctx.fillStyle = 'rgba(232,160,32,0.8)';
-  ctx.font = '10px Inter, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('source', x + imgW/2, y + imgH/2);
+  // The source, drawn to scale at its placement
+  if (_opSrcImg && _opSrcImg.naturalWidth) {
+    ctx.drawImage(_opSrcImg, dx, dy, dw, dh);
+  } else {
+    ctx.fillStyle = 'rgba(232,160,32,0.30)';
+    ctx.fillRect(dx, dy, dw, dh);
+  }
+  // Outline the source so its edges are clear against the fill
+  ctx.strokeStyle = 'rgba(232,160,32,0.9)';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(dx + 0.75, dy + 0.75, dw - 1.5, dh - 1.5);
+
+  // Mirror the computed absolute offsets into the (advanced) number fields
+  document.getElementById('op-offset-x').value = ox;
+  document.getElementById('op-offset-y').value = oy;
 }
 
-// Offset inputs still trigger preview update
-['op-offset-x','op-offset-y'].forEach(id => {
-  document.getElementById(id)?.addEventListener('input', updateOutpaintPreview);
-});
-
-document.getElementById('op-center-btn').addEventListener('click', () => {
-  document.getElementById('op-offset-x').value = '';
-  document.getElementById('op-offset-y').value = '';
+// ── Size slider ──
+const _opSizeSlider = document.getElementById('op-size-slider');
+_opSizeSlider.addEventListener('input', () => {
+  _opSizePct = Number(_opSizeSlider.value) || 100;
+  document.getElementById('op-size-val').textContent = `${_opSizePct}%`;
   updateOutpaintPreview();
 });
 
+// ── Drag to reposition the source inside the frame ──
+function _opCanvasPos(e) {
+  const r = _opCanvas.getBoundingClientRect();
+  const s = _opCanvas.width / r.width;                 // display px per CSS px
+  return { x: (e.clientX - r.left) * s, y: (e.clientY - r.top) * s };
+}
+function _opBoxInDisplay() {
+  const { W, sw, sh, ox, oy } = _opComputeBox();
+  const s = _opCanvas.width / W;
+  return { dx: ox * s, dy: oy * s, dw: sw * s, dh: sh * s };
+}
+_opCanvas.addEventListener('pointerdown', (e) => {
+  const p = _opCanvasPos(e);
+  const b = _opBoxInDisplay();
+  // Start a drag whether or not you grab exactly on the source — clicking the
+  // frame jumps the source under the cursor, which feels natural for placement.
+  const insideX = p.x >= b.dx && p.x <= b.dx + b.dw;
+  const insideY = p.y >= b.dy && p.y <= b.dy + b.dh;
+  _opDragDX = (insideX ? p.x - b.dx : b.dw / 2);
+  _opDragDY = (insideY ? p.y - b.dy : b.dh / 2);
+  _opDragging = true;
+  _opCanvas.setPointerCapture(e.pointerId);
+  _opCanvas.style.cursor = 'grabbing';
+  _opApplyDrag(p);
+});
+_opCanvas.addEventListener('pointermove', (e) => { if (_opDragging) _opApplyDrag(_opCanvasPos(e)); });
+_opCanvas.addEventListener('pointerup',   () => { _opDragging = false; _opCanvas.style.cursor = 'grab'; });
+_opCanvas.addEventListener('pointercancel', () => { _opDragging = false; _opCanvas.style.cursor = 'grab'; });
+
+function _opApplyDrag(p) {
+  const { W, H, sw, sh, freeX, freeY } = _opComputeBox();
+  const s = _opCanvas.width / W;
+  // Desired top-left in output px = cursor − grab offset, converted from display px
+  const ox = (p.x - _opDragDX) / s;
+  const oy = (p.y - _opDragDY) / s;
+  _opPosFracX = freeX > 0 ? Math.min(1, Math.max(0, ox / freeX)) : 0.5;
+  _opPosFracY = freeY > 0 ? Math.min(1, Math.max(0, oy / freeY)) : 0.5;
+  updateOutpaintPreview();
+}
+
+// Manual offset entry (advanced) → convert absolute px back to a position fraction
+['op-offset-x','op-offset-y'].forEach(id => {
+  document.getElementById(id)?.addEventListener('input', () => {
+    const { freeX, freeY } = _opComputeBox();
+    const vx = Number(document.getElementById('op-offset-x').value);
+    const vy = Number(document.getElementById('op-offset-y').value);
+    if (!Number.isNaN(vx)) _opPosFracX = freeX > 0 ? Math.min(1, Math.max(0, vx / freeX)) : 0.5;
+    if (!Number.isNaN(vy)) _opPosFracY = freeY > 0 ? Math.min(1, Math.max(0, vy / freeY)) : 0.5;
+    updateOutpaintPreview();
+  });
+});
+
+document.getElementById('op-center-btn').addEventListener('click', () => {
+  _opPosFracX = 0.5; _opPosFracY = 0.5;
+  updateOutpaintPreview();
+});
+
+// Scale the source to exactly sw×sh output pixels and upload it, so the API
+// places it at that size at our offset. If no scaling is needed, reuse the
+// already-uploaded original.
+async function _opScaleSourceUpload(sw, sh) {
+  if (sw === _outpaintImgNW && sh === _outpaintImgNH) return outpaintUZ.url;
+  const c = document.createElement('canvas');
+  c.width = sw; c.height = sh;
+  c.getContext('2d').drawImage(_opSrcImg, 0, 0, sw, sh);
+  const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+  const fd = new FormData(); fd.append('image', blob, 'op-src.png');
+  const res = await fetch('/api/upload', { method: 'POST', body: fd });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.url) throw new Error('Failed to upload resized source image');
+  return data.url;
+}
+
 document.getElementById('btn-outpaint').addEventListener('click', async () => {
-  if (!outpaintUZ.url) { toast('Upload a source image first', 'warn'); return; }
+  if (!outpaintUZ.url || !_opSrcImg) { toast('Upload a source image first', 'warn'); return; }
   let w = Number(document.getElementById('op-width').value);
   let h = Number(document.getElementById('op-height').value);
   if (!w || !h) { toast('Set output width and height', 'warn'); return; }
@@ -2143,25 +2248,27 @@ document.getElementById('btn-outpaint').addEventListener('click', async () => {
     h = Math.max(64, Math.floor((h * s) / 16) * 16);
     document.getElementById('op-width').value = w;
     document.getElementById('op-height').value = h;
+    updateOutpaintPreview();
     toast(`Canvas ${origW}×${origH} exceeded the 4MP outpaint limit — scaled to ${w}×${h}`, 'warn');
   }
+
+  // Derive the source's placed size + offset from the (now-clamped) frame.
+  const { W, H, sw, sh, ox, oy } = _opComputeBox();
 
   const btn = document.getElementById('btn-outpaint');
   btn.disabled = true;
   showStatus('outpaint-status');
   const stopTimer = startTimer(document.getElementById('outpaint-elapsed'));
 
-  const oxVal = document.getElementById('op-offset-x').value;
-  const oyVal = document.getElementById('op-offset-y').value;
-
   try {
+    const srcUrl = await _opScaleSourceUpload(sw, sh);
     const entry = await apiFetch('/api/outpaint', {
-      image_url:        outpaintUZ.url,
-      width: w, height: h,
+      image_url:        srcUrl,
+      width: W, height: H,
       prompt:           document.getElementById('op-prompt').value || undefined,
       mode:             document.getElementById('op-mode').value,
-      reference_offset_x: oxVal !== '' ? Number(oxVal) : undefined,
-      reference_offset_y: oyVal !== '' ? Number(oyVal) : undefined,
+      reference_offset_x: ox,
+      reference_offset_y: oy,
       auto_crop:        document.getElementById('op-autocrop').checked,
       output_format:    document.getElementById('op-format').value,
       safety_tolerance: 5,
