@@ -184,7 +184,17 @@ class FullscreenPainter {
     this.showOverlay = true;
     this._tab       = null;      // 'inpaint' | 'erase'
     this._callback  = null;      // called with b64 mask on Apply
-    this._masks     = {};        // { inpaint: b64|null, erase: b64|null }
+    this._masks     = {};        // { inpaint: b64|null, erase: b64|null } — API export (black bg + white)
+    // Alpha-preserving restore copies (transparent where unpainted). The API
+    // export flattens onto opaque black, which — if used to restore the painter —
+    // makes every pixel opaque and reads as "whole image selected". Restore from
+    // these instead so an existing mask reopens exactly as it was left.
+    this._maskRestore = {};      // { inpaint: dataURL|null, erase: dataURL|null }
+
+    // Per-stroke undo history (ImageData snapshots of offCanvas taken BEFORE each
+    // stroke/clear/invert). Capped to bound memory; freed on open/close.
+    this._undoStack = [];
+    this.UNDO_LIMIT = 20;
 
     this._setupToolbar();
     this._setupPointer();
@@ -207,6 +217,7 @@ class FullscreenPainter {
       })
     );
 
+    document.getElementById('pm-undo-btn').addEventListener('click',   () => this._undo());
     document.getElementById('pm-clear-btn').addEventListener('click',  () => this._clearMask());
     document.getElementById('pm-invert-btn').addEventListener('click', () => this._invertMask());
     document.getElementById('pm-overlay-toggle').addEventListener('change', e => {
@@ -216,11 +227,15 @@ class FullscreenPainter {
     document.getElementById('pm-cancel-btn').addEventListener('click', () => this._close(false));
     document.getElementById('pm-done-btn').addEventListener('click',   () => this._close(true));
 
-    // Keyboard: Escape cancels, Enter applies
+    // Keyboard: Escape cancels, Ctrl/Cmd+Enter applies, Ctrl/Cmd+Z undoes last stroke
     document.addEventListener('keydown', e => {
       if (this.modal.classList.contains('hidden')) return;
       if (e.key === 'Escape') this._close(false);
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) this._close(true);
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        this._undo();
+      }
     });
   }
 
@@ -230,6 +245,7 @@ class FullscreenPainter {
     c.addEventListener('pointerdown', e => {
       this.painting = true;
       c.setPointerCapture(e.pointerId);
+      this._pushUndo(); // snapshot the mask BEFORE this stroke so ⌘Z can revert it
       this._paint(e);
     });
     c.addEventListener('pointermove',  e => { if (this.painting) this._paint(e); });
@@ -310,12 +326,36 @@ class FullscreenPainter {
     }
   }
 
+  /* ── Undo (per-stroke ImageData snapshots) ── */
+  _pushUndo() {
+    const w = this.offCanvas.width, h = this.offCanvas.height;
+    if (!w || !h) return;
+    this._undoStack.push(this.offCtx.getImageData(0, 0, w, h));
+    if (this._undoStack.length > this.UNDO_LIMIT) this._undoStack.shift();
+    this._updateUndoBtn();
+  }
+
+  _undo() {
+    if (!this._undoStack.length) return;
+    const snap = this._undoStack.pop();
+    this.offCtx.putImageData(snap, 0, 0);
+    this._redrawOverlay();
+    this._updateUndoBtn();
+  }
+
+  _updateUndoBtn() {
+    const btn = document.getElementById('pm-undo-btn');
+    if (btn) btn.disabled = this._undoStack.length === 0;
+  }
+
   _clearMask() {
+    this._pushUndo(); // clearing is undoable
     this.offCtx.clearRect(0, 0, this.offCanvas.width, this.offCanvas.height);
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
   }
 
   _invertMask() {
+    this._pushUndo(); // inverting is undoable
     // Pixel-flip: invert R/G/B of every pixel in the mask canvas
     const w = this.offCanvas.width, h = this.offCanvas.height;
     const id = this.offCtx.getImageData(0, 0, w, h);
@@ -335,7 +375,9 @@ class FullscreenPainter {
     // Draw mask, then tint painted pixels red using source-in
     this.ctx.save();
     this.ctx.globalAlpha = 0.55;
-    this.ctx.drawImage(this.offCanvas, 0, 0);
+    // offCanvas is at natural resolution; scale it down to the (possibly smaller)
+    // display canvas so the overlay lines up on large images too.
+    this.ctx.drawImage(this.offCanvas, 0, 0, w, h);
     this.ctx.globalCompositeOperation = 'source-in';
     this.ctx.globalAlpha = 1;
     this.ctx.fillStyle = 'rgb(255,60,60)';
@@ -387,17 +429,22 @@ class FullscreenPainter {
     this._displayScale = scale; // store for coordinate transform
     this.ctx.clearRect(0, 0, dw, dh);
 
-    // Restore previous mask for this tab if any
-    const existing = this._masks[this._tab];
+    // Fresh painter session → empty undo history
+    this._undoStack = [];
+    this._updateUndoBtn();
+
+    // Restore previous mask for this tab if any. Use the alpha-preserving copy
+    // (transparent where unpainted) — NOT the API export, which is flattened onto
+    // opaque black and would make the whole image read as painted on reopen.
+    const existing = this._maskRestore[this._tab];
     if (existing) {
       const m = new Image();
       m.onload = () => {
-        this.offCtx.drawImage(m, 0, 0);
-        // Scale down to display canvas for overlay
-        this.ctx.drawImage(this.offCanvas, 0, 0, dw, dh);
+        this.offCtx.clearRect(0, 0, nw, nh);
+        this.offCtx.drawImage(m, 0, 0, nw, nh);
         this._redrawOverlay();
       };
-      m.src = 'data:image/png;base64,' + existing;
+      m.src = existing;
     }
   }
 
@@ -405,8 +452,12 @@ class FullscreenPainter {
     if (apply) {
       const b64 = this._exportMask();
       this._masks[this._tab] = b64;
+      // Persist an alpha-preserving copy so reopening restores the exact strokes
+      // (transparent where unpainted) rather than a fully-opaque select-all.
+      this._maskRestore[this._tab] = this.offCanvas.toDataURL('image/png');
       this._callback?.(b64, this._tab);
     }
+    this._undoStack = []; // don't leak snapshots between sessions
     this.modal.classList.add('hidden');
     document.body.style.overflow = '';
   }
@@ -424,7 +475,7 @@ class FullscreenPainter {
 
   hasMask(tab) { return !!(this._masks[tab]); }
   getMask(tab) { return this._masks[tab]; }
-  clearMaskFor(tab) { delete this._masks[tab]; }
+  clearMaskFor(tab) { delete this._masks[tab]; delete this._maskRestore[tab]; }
 }
 
 const painter = new FullscreenPainter();
@@ -474,6 +525,17 @@ painter._callback = (b64, tab) => {
   toast('Mask applied ✓', 'success');
 };
 
+// Drop any stored/persisted mask for a tab and reset its sidebar UI. Called when a
+// new source image is loaded so a mask painted on the previous image is never
+// restored onto (or submitted against) a different image.
+function resetMaskUI(tab) {
+  painter.clearMaskFor(tab);
+  const thumb = document.getElementById(`${tab}-mask-thumb`);
+  const hint  = document.getElementById(`${tab}-mask-empty-hint`);
+  if (thumb) thumb.classList.add('hidden');
+  if (hint)  hint.style.display = '';
+}
+
 
 // ─── HTML escaping helper (prevents innerHTML corruption from user prompts) ────
 function escHtml(s) {
@@ -483,6 +545,18 @@ function escHtml(s) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+// Decide which way a "Send to" dropdown opens. It's anchored above its trigger by
+// default, but result/history cards sit at the top of the grid where there's no room
+// above — the menu would clip into the top nav. Flip it below when above is too tight.
+function placeSendToMenu(triggerBtn, menu) {
+  menu.classList.remove('open-down');
+  const btnRect = triggerBtn.getBoundingClientRect();
+  const menuH   = menu.offsetHeight || 280; // measurable now that it's un-hidden
+  const spaceAbove = btnRect.top;
+  const spaceBelow = window.innerHeight - btnRect.bottom;
+  if (spaceAbove < menuH + 16 && spaceBelow > spaceAbove) menu.classList.add('open-down');
 }
 
 // ─── Result card builder ──────────────────────────────────────────────────────
@@ -534,6 +608,7 @@ function buildResultCard(entry, onSendInpaint, onSendGenerate) {
     // Close all other open menus first
     document.querySelectorAll('.rc-sendto-menu').forEach(m => { if (m !== rcMenu) m.classList.add('hidden'); });
     rcMenu.classList.toggle('hidden');
+    if (!rcMenu.classList.contains('hidden')) placeSendToMenu(e.currentTarget, rcMenu);
   });
   rcMenu.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-sendto]');
@@ -1024,6 +1099,7 @@ const _lbSendMenu = document.getElementById('lb-sendto-menu');
 document.getElementById('lb-sendto-btn').addEventListener('click', (e) => {
   e.stopPropagation();
   _lbSendMenu.classList.toggle('hidden');
+  if (!_lbSendMenu.classList.contains('hidden')) placeSendToMenu(e.currentTarget, _lbSendMenu);
 });
 
 _lbSendMenu.addEventListener('click', (e) => {
@@ -1440,6 +1516,21 @@ function createRefSlot(i) {
     try {
       const data = await uploadFile(file);
       state.url = data.url;
+
+      // FLUX.2 rejects any reference image over 4MP outright (the error
+      // surfaces later, mid-batch, as "Total pixels exceeds maximum...").
+      // Auto-downsample minimally (aspect-ratio preserved) instead of
+      // letting the whole generation fail on an oversized reference.
+      const GEN_REF_MAX_PX = 4_194_304; // FLUX.2 hard cap — 2048×2048
+      const { url, resized, origW, origH, newW, newH } =
+        await resizeImageIfNeeded(objUrl, data.url, GEN_REF_MAX_PX);
+      state.url = url;
+      if (resized) {
+        toast(
+          `Reference image ${i + 1} was ${origW}×${origH} — downsampled to ${newW}×${newH} to stay within FLUX.2's 4MP limit`,
+          'warn'
+        );
+      }
     } catch (e) { toast('Upload failed', 'error'); }
   }
 
@@ -1623,6 +1714,23 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
   const prompt = document.getElementById('gen-prompt').value.trim();
   if (!prompt) { toast('Enter a prompt', 'warn'); return; }
 
+  // FLUX.2 output canvas has the same 4MP hard cap as reference images.
+  // gen-width/gen-height are each independently clamped to 4096px by _snap16,
+  // but their product isn't checked — AR-lock or manual entry can still
+  // combine two in-range values into an out-of-range canvas (this is the exact
+  // "Total pixels exceeds maximum of 4194304" error). Clamp the pair before sending.
+  const GEN_OUT_MAX_PX = 4_194_304;
+  const rawGenW = Number(document.getElementById('gen-width').value);
+  const rawGenH = Number(document.getElementById('gen-height').value);
+  if (rawGenW && rawGenH && rawGenW * rawGenH > GEN_OUT_MAX_PX) {
+    const s = Math.sqrt(GEN_OUT_MAX_PX / (rawGenW * rawGenH));
+    const newGenW = Math.max(64, Math.floor((rawGenW * s) / 16) * 16);
+    const newGenH = Math.max(64, Math.floor((rawGenH * s) / 16) * 16);
+    document.getElementById('gen-width').value  = newGenW;
+    document.getElementById('gen-height').value = newGenH;
+    toast(`Output size ${rawGenW}×${rawGenH} exceeded the 4MP limit — scaled to ${newGenW}×${newGenH}`, 'warn');
+  }
+
   const batchCount = Number(document.getElementById('gen-batch').value) || 1;
   const pinnedSeed = document.getElementById('gen-seed').value;
   const btn        = document.getElementById('btn-generate');
@@ -1696,7 +1804,30 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
 
 const inpaintUZ = new UploadZone('inpaint-upload', 'inpaint-file', 'inpaint-img-preview');
 
-inpaintUZ.onChange = (objUrl) => {
+// FLUX.1 Fill hard cap — 2048×2048 / 4MP. Above this the API either rejects the
+// request or silently downscales it server-side (losing quality + risking a
+// mask/image size mismatch, since the mask painter sizes itself off whatever
+// image it's given). Resize client-side BEFORE the painter opens so the mask
+// the user draws always matches the resolution actually submitted.
+const INPAINT_MAX_PX = 2048 * 2048;
+
+inpaintUZ.onChange = async (objUrl, serverUrl) => {
+  resetMaskUI('inpaint'); // new image → discard any mask from the previous one
+  if (objUrl) {
+    try {
+      const { resized, url, origW, origH, newW, newH } =
+        await resizeImageIfNeeded(objUrl, serverUrl, INPAINT_MAX_PX);
+      if (resized) {
+        inpaintUZ.url = url;
+        inpaintUZ.objUrl = null; // use the resized server copy for preview + painter
+        if (inpaintUZ.preview) inpaintUZ.preview.src = url;
+        toast(
+          `Image ${origW}×${origH} exceeded Inpaint's 4MP limit — downsampled to ${newW}×${newH}`,
+          'warn'
+        );
+      }
+    } catch (e) { /* fall back to original image if the resize check fails */ }
+  }
   // Enable the Open Painter button once we have an image
   document.getElementById('inpaint-open-painter').disabled = false;
 };
@@ -1748,7 +1879,28 @@ document.getElementById('btn-inpaint').addEventListener('click', async () => {
 // ─── ERASE tab ────────────────────────────────────────────────────────────────
 const eraseUZ = new UploadZone('erase-upload', 'erase-file', 'erase-img-preview');
 
-eraseUZ.onChange = (objUrl) => {
+// Confirmed via live API error: Erase enforces the same 2048×2048 / 4MP hard cap
+// as Deblur/Generate ("exceeds maximum of 4194304 pixels (2048x2048)"). Resize
+// before the painter opens so the mask always matches the submitted resolution.
+const ERASE_MAX_PX = 2048 * 2048;
+
+eraseUZ.onChange = async (objUrl, serverUrl) => {
+  resetMaskUI('erase'); // new image → discard any mask from the previous one
+  if (objUrl) {
+    try {
+      const { resized, url, origW, origH, newW, newH } =
+        await resizeImageIfNeeded(objUrl, serverUrl, ERASE_MAX_PX);
+      if (resized) {
+        eraseUZ.url = url;
+        eraseUZ.objUrl = null;
+        if (eraseUZ.preview) eraseUZ.preview.src = url;
+        toast(
+          `Image ${origW}×${origH} exceeded Erase's 4MP limit — downsampled to ${newW}×${newH}`,
+          'warn'
+        );
+      }
+    } catch (e) { /* fall back to original image if the resize check fails */ }
+  }
   document.getElementById('erase-open-painter').disabled = false;
 };
 
@@ -1974,9 +2126,25 @@ document.getElementById('op-center-btn').addEventListener('click', () => {
 
 document.getElementById('btn-outpaint').addEventListener('click', async () => {
   if (!outpaintUZ.url) { toast('Upload a source image first', 'warn'); return; }
-  const w = Number(document.getElementById('op-width').value);
-  const h = Number(document.getElementById('op-height').value);
+  let w = Number(document.getElementById('op-width').value);
+  let h = Number(document.getElementById('op-height').value);
   if (!w || !h) { toast('Set output width and height', 'warn'); return; }
+
+  // Outpainting canvas has a 4MP hard cap (same limit as Generate) — the width/height
+  // inputs and AR-lock logic only clamp each side to 4096px individually, so a large
+  // canvas can still exceed 4MP in total. Scale down proportionally before sending.
+  const OUTPAINT_MAX_PX = 4_194_304; // 4MP, e.g. 2048×2048
+  if (w * h > OUTPAINT_MAX_PX) {
+    const s = Math.sqrt(OUTPAINT_MAX_PX / (w * h));
+    const origW = w, origH = h;
+    // Floor (not round) the 16px snap — rounding up can push the area back over
+    // the cap (e.g. 3000x2000 rounds to 4,220,160px, still over the 4,194,304 limit).
+    w = Math.max(64, Math.floor((w * s) / 16) * 16);
+    h = Math.max(64, Math.floor((h * s) / 16) * 16);
+    document.getElementById('op-width').value = w;
+    document.getElementById('op-height').value = h;
+    toast(`Canvas ${origW}×${origH} exceeded the 4MP outpaint limit — scaled to ${w}×${h}`, 'warn');
+  }
 
   const btn = document.getElementById('btn-outpaint');
   btn.disabled = true;
@@ -2583,6 +2751,7 @@ function renderHistory() {
       e.stopPropagation();
       document.querySelectorAll('.hc-sendto-menu').forEach(m => { if (m !== hcMenu) m.classList.add('hidden'); });
       hcMenu?.classList.toggle('hidden');
+      if (hcMenu && !hcMenu.classList.contains('hidden')) placeSendToMenu(e.currentTarget, hcMenu);
     });
     hcMenu?.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-sendto]');

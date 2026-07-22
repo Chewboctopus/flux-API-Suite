@@ -23,7 +23,7 @@
     </div>
     <div class="apikey-divider"></div>
     <div class="apikey-form">
-      <label for="input-topazkey">Topaz API Key <span class="field-hint">(for Upscale)</span></label>
+      <label for="input-topazkey">Topaz API Key <span class="field-optional">Optional</span> <span class="field-hint">(for Upscale)</span></label>
       <input type="password" id="input-topazkey" placeholder="your-topaz-api-key" autocomplete="off" spellcheck="false">
       <p class="apikey-note" style="margin-top:4px;text-align:left">Get a key at <a href="https://account.topazlabs.com/manage-api" target="_blank">account.topazlabs.com</a></p>
     </div>
@@ -1107,7 +1107,7 @@
 
     <div class="pm-tools">
       <button class="btn btn-secondary btn-sm pm-mode-btn active" data-mode="paint" id="pm-paint-btn">🖌 Paint</button>
-      <button class="btn btn-secondary btn-sm pm-mode-btn" data-mode="erase" id="pm-erase-btn">⌫ Un-paint</button>
+      <button class="btn btn-secondary btn-sm pm-mode-btn" data-mode="erase" id="pm-erase-btn">⌫ Erase</button>
 
       <div class="pm-sep"></div>
 
@@ -1119,6 +1119,7 @@
 
       <div class="pm-sep"></div>
 
+      <button class="btn btn-secondary btn-sm" id="pm-undo-btn" title="Undo last stroke (⌘Z / Ctrl+Z)" disabled>↶ Undo</button>
       <button class="btn btn-secondary btn-sm" id="pm-clear-btn">Clear All</button>
       <button class="btn btn-secondary btn-sm" id="pm-invert-btn">Invert</button>
 
@@ -1147,7 +1148,7 @@
     </div>
     <!-- Hint strip at bottom -->
     <div class="pm-hint" id="pm-hint-strip">
-      🖌 Paint the area you want to modify · ⌫ Un-paint to remove brush strokes · Scroll to zoom · Brush size slider above
+      🖌 Paint the area you want to modify · ⌫ Erase to remove brush strokes · Scroll to zoom · Brush size slider above
     </div>
   </div>
 </div>

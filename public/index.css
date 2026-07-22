@@ -467,6 +467,13 @@ body {
   justify-content: space-between;
 }
 .field-hint { font-size: 11px; color: var(--text-secondary); font-weight: 400; text-transform: none; letter-spacing: 0; }
+.field-optional {
+  font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--text-secondary);
+  background: rgba(255,255,255,0.07);
+  border: 1px solid var(--border);
+  padding: 1px 6px; border-radius: 999px; vertical-align: middle;
+}
 textarea, input[type=text], input[type=number], input[type=url], input[type=password], select {
   background: var(--bg-input);
   border: 1px solid var(--border);
@@ -783,7 +790,8 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  overflow: hidden;
+  /* overflow stays visible so the "Send to" dropdown can extend past the card
+     edge without being clipped; the image rounds its own top corners below. */
   transition: var(--transition);
 }
 .result-card:hover { border-color: var(--border-hover); transform: translateY(-1px); box-shadow: var(--shadow); }
@@ -794,6 +802,7 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px;
   object-fit: contain;
   background: #000;
   max-height: 520px;  /* prevent extremely tall portrait images from overwhelming the grid */
+  border-radius: var(--r-md) var(--r-md) 0 0; /* keep rounded top now that the card no longer clips */
 }
 
 .result-card-body { padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
@@ -842,12 +851,12 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  overflow: hidden;
+  /* overflow visible so the "Send to" dropdown isn't clipped; img rounds its own top corners. */
   margin-bottom: 10px;
   transition: var(--transition);
 }
 .history-card:hover { border-color: var(--border-hover); }
-.history-card img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block; cursor: pointer; }
+.history-card img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block; cursor: pointer; border-radius: var(--r-md) var(--r-md) 0 0; }
 .history-card-body { padding: 8px 10px; display: flex; flex-direction: column; gap: 5px; }
 .history-card-prompt { font-size: 12px; color: var(--text-secondary); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .history-meta-row { display: flex; align-items: center; gap: 6px; justify-content: space-between; }
@@ -952,6 +961,8 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px;
   position: absolute;
   bottom: calc(100% + 8px);
   right: 0;
+  max-height: min(70vh, 420px);
+  overflow-y: auto;
   background: #1e1e2e;
   border: 1px solid rgba(255,255,255,0.14);
   border-radius: 10px;
@@ -980,6 +991,10 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px;
 }
 .lb-sendto-menu button:hover { background: rgba(255,255,255,0.09); }
 .lb-sendto-hint { font-size: 10px; color: var(--text-muted); margin-left: auto; }
+
+/* Flip downward when there isn't room above the trigger (set by JS) so the
+   menu is never clipped by the top nav / viewport edge. */
+.lb-sendto-menu.open-down { top: calc(100% + 8px); bottom: auto; }
 
 /* Lightbox prev/next nav arrows */
 .lb-nav {
