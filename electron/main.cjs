@@ -299,7 +299,9 @@ function buildMenu() {
     {
       label: APP_NAME,
       submenu: [
-        { role: 'about' }, { type: 'separator' },
+        { role: 'about' },
+        { label: 'Check for Updates…', click: () => checkForUpdates(true) },
+        { type: 'separator' },
         { role: 'services' }, { type: 'separator' },
         { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' },
         { type: 'separator' }, { role: 'quit' },
@@ -330,33 +332,141 @@ function buildMenu() {
 }
 
 // ── Auto-update (GitHub Releases via electron-builder's publish config) ───────
-// macOS builds are unsigned but auto-update works via the zip target
-// (electron-updater handles zip extraction natively, no code signing needed).
+// macOS builds here are UNSIGNED. Squirrel.Mac refuses to *install* an unsigned
+// update, so the old auto-download+install path just looped: it downloaded the
+// update on every launch, failed to apply it silently, and re-prompted forever.
+// So on macOS we only DETECT a new version and download the correct .dmg to the
+// user's Downloads folder for a manual drag-to-Applications install. Windows and
+// Linux are unaffected by this limitation and keep true silent auto-install.
+const RELEASES_URL = 'https://github.com/Chewboctopus/flux-API-Suite/releases/latest';
+const IS_MAC = process.platform === 'darwin';
+let _manualCheck = false;      // was the in-flight check triggered from the menu?
+let _dmgDownloadPending = false;
+
 function initAutoUpdate() {
   if (IS_DEV) return;
-  autoUpdater.autoDownload = true;
-  autoUpdater.on('error', (e) => console.error('[AutoUpdate] error:', e?.message || e));
-  autoUpdater.on('update-available', (info) => {
-    console.log('[AutoUpdate] update available:', info?.version);
+  // On macOS, never auto-download/install — it can't succeed unsigned.
+  autoUpdater.autoDownload         = !IS_MAC;
+  autoUpdater.autoInstallOnAppQuit = !IS_MAC;
+
+  autoUpdater.on('error', (e) => {
+    console.error('[AutoUpdate] error:', e?.message || e);
+    if (_manualCheck) {
+      _manualCheck = false;
+      dialog.showMessageBox(mainWindow, {
+        type: 'error', title: 'Update Check Failed',
+        message: 'Could not check for updates.',
+        detail: e?.message || String(e), buttons: ['OK'],
+      });
+    }
   });
-  autoUpdater.on('update-downloaded', (info) => {
-    console.log('[AutoUpdate] downloaded:', info?.version);
-    const version = info?.version || 'new version';
+
+  autoUpdater.on('update-available', (info) => {
+    const v = info?.version || '';
+    console.log('[AutoUpdate] update available:', v);
+    _manualCheck = false;
+    if (!IS_MAC) return; // Win/Linux: autoDownload handles it (see update-downloaded)
     dialog.showMessageBox(mainWindow, {
-      type: 'info',
-      title: 'Update Ready',
-      message: `FLUX Studio v${version} has been downloaded.`,
-      detail: 'The update will be installed when you restart the app.',
-      buttons: ['Restart Now', 'Later'],
-      defaultId: 0,
-      cancelId: 1,
+      type: 'info', title: 'Update Available',
+      message: `FLUX Studio ${v} is available.`,
+      detail: `You're running ${app.getVersion()}. Download the latest version to your Downloads folder?`,
+      buttons: ['Download', 'View Release Page', 'Later'],
+      defaultId: 0, cancelId: 2,
     }).then(({ response }) => {
-      if (response === 0) autoUpdater.quitAndInstall();
+      if (response === 0) downloadLatestDmg(v);
+      else if (response === 1) shell.openExternal(RELEASES_URL);
     });
   });
-  autoUpdater.checkForUpdatesAndNotify().catch((e) =>
-    console.error('[AutoUpdate] check failed:', e?.message || e)
-  );
+
+  autoUpdater.on('update-not-available', () => {
+    console.log('[AutoUpdate] up to date');
+    if (_manualCheck) {
+      _manualCheck = false;
+      dialog.showMessageBox(mainWindow, {
+        type: 'info', title: 'Up to Date',
+        message: `FLUX Studio ${app.getVersion()} is the latest version.`,
+        buttons: ['OK'],
+      });
+    }
+  });
+
+  // Windows/Linux only — macOS never reaches this (autoDownload is off there).
+  autoUpdater.on('update-downloaded', (info) => {
+    const version = info?.version || 'new version';
+    dialog.showMessageBox(mainWindow, {
+      type: 'info', title: 'Update Ready',
+      message: `FLUX Studio v${version} has been downloaded.`,
+      detail: 'The update will be installed when you restart the app.',
+      buttons: ['Restart Now', 'Later'], defaultId: 0, cancelId: 1,
+    }).then(({ response }) => { if (response === 0) autoUpdater.quitAndInstall(); });
+  });
+
+  checkForUpdates(false); // silent check on launch
+}
+
+// Trigger an update check. `manual` = true surfaces "up to date" / errors to the
+// user (menu-initiated); false is the quiet launch check.
+function checkForUpdates(manual) {
+  if (IS_DEV) {
+    if (manual) dialog.showMessageBox(mainWindow, {
+      type: 'info', title: 'Check for Updates',
+      message: 'Update checks are disabled in development.', buttons: ['OK'],
+    });
+    return;
+  }
+  _manualCheck = manual;
+  autoUpdater.checkForUpdates().catch((e) => {
+    // The 'error' handler surfaces this to the user when _manualCheck is set.
+    console.error('[AutoUpdate] check failed:', e?.message || e);
+  });
+}
+
+// macOS: download the DMG matching this Mac's architecture straight into the
+// Downloads folder (following GitHub's CDN redirects via Electron's download
+// stack), then reveal it in Finder.
+function downloadLatestDmg(version) {
+  if (_dmgDownloadPending) return;
+  const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+  const file = arch === 'arm64'
+    ? `FLUX-Studio-${version}-arm64.dmg`
+    : `FLUX-Studio-${version}.dmg`;
+  const url  = `https://github.com/Chewboctopus/flux-API-Suite/releases/download/v${version}/${file}`;
+  const dest = path.join(app.getPath('downloads'), file);
+  const ses  = mainWindow.webContents.session;
+
+  _dmgDownloadPending = true;
+  const onWillDownload = (_event, item) => {
+    if (!_dmgDownloadPending) return;      // not our download
+    _dmgDownloadPending = false;           // claim this one
+    item.setSavePath(dest);
+    item.on('updated', (_e, state) => {
+      if (state === 'progressing' && item.getTotalBytes() > 0) {
+        mainWindow.setProgressBar(item.getReceivedBytes() / item.getTotalBytes());
+      }
+    });
+    item.once('done', (_e, state) => {
+      mainWindow.setProgressBar(-1);
+      ses.removeListener('will-download', onWillDownload);
+      if (state === 'completed') {
+        shell.showItemInFolder(dest);
+        dialog.showMessageBox(mainWindow, {
+          type: 'info', title: 'Download Complete',
+          message: `${file} was saved to your Downloads folder.`,
+          detail: 'Open it, then drag FLUX Studio into Applications (replacing the old copy) to finish updating.',
+          buttons: ['OK'],
+        });
+      } else {
+        dialog.showMessageBox(mainWindow, {
+          type: 'error', title: 'Download Failed',
+          message: `Could not download ${file}.`,
+          detail: `Download ${state}. You can grab it manually from the release page instead.`,
+          buttons: ['Open Release Page', 'OK'], defaultId: 0, cancelId: 1,
+        }).then(({ response }) => { if (response === 0) shell.openExternal(RELEASES_URL); });
+      }
+    });
+  };
+  ses.on('will-download', onWillDownload);
+  mainWindow.webContents.downloadURL(url);
 }
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────
