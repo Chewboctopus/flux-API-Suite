@@ -750,6 +750,34 @@ function openLightbox(entry, contextList, contextIndex) {
     reloadBtn.onclick = null;
   }
 
+  // Delete button — always show when we have a history id and local_file
+  const delBtn = document.getElementById('lightbox-delete');
+  if (entry.id && entry.local_file) {
+    delBtn.style.display = '';
+    delBtn.onclick = async () => {
+      const prompt = entry.prompt || 'Untitled';
+      const preview = prompt.length > 40 ? prompt.slice(0, 40) + '…' : prompt;
+      if (!confirm(`Delete "${preview}"?`)) return;
+      delBtn.textContent = '⏳ Deleting…';
+      delBtn.disabled = true;
+      const res = await fetch(`/api/history/${encodeURIComponent(entry.id)}`, { method: 'DELETE' });
+      delBtn.textContent = '🗑 Delete';
+      delBtn.disabled = false;
+      if (res.ok) {
+        document.getElementById('lightbox').classList.add('hidden');
+        _allHistory = _allHistory.filter(h => h.id !== entry.id);
+        renderHistory();
+        toast('Deleted', 'info');
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast(err.error || 'Delete failed', 'error');
+      }
+    };
+  } else {
+    delBtn.style.display = 'none';
+    delBtn.onclick = null;
+  }
+
   document.getElementById('lightbox').classList.remove('hidden');
 }
 
@@ -2854,6 +2882,7 @@ function renderHistory() {
               <button data-sendto="upscale">🔬 Upscale <span class="lb-sendto-hint">Topaz</span></button>
             </div>
           </div>
+          <button class="btn btn-secondary btn-sm" data-action="hc-delete" title="Delete from history">🗑</button>
         </div>
       </div>`;
 
@@ -2864,6 +2893,20 @@ function renderHistory() {
 
 
     card.querySelector('[data-action="copy"]')?.addEventListener('click', () => copyImageToClipboard(entry.image_url));
+    card.querySelector('[data-action="hc-delete"]')?.addEventListener('click', async () => {
+      const prompt = entry.prompt || 'Untitled';
+      const preview = prompt.length > 40 ? prompt.slice(0, 40) + '…' : prompt;
+      if (!confirm(`Delete "${preview}"?`)) return;
+      const res = await fetch(`/api/history/${encodeURIComponent(entry.id)}`, { method: 'DELETE' });
+      if (res.ok) {
+        _allHistory = _allHistory.filter(h => h.id !== entry.id);
+        renderHistory();
+        toast('Deleted', 'info');
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast(err.error || 'Delete failed', 'error');
+      }
+    });
     card.querySelector('[data-action="hc-sendto"]')?.addEventListener('click', (e) => {
       e.stopPropagation();
       document.querySelectorAll('.hc-sendto-menu').forEach(m => { if (m !== hcMenu) m.classList.add('hidden'); });
@@ -2894,6 +2937,10 @@ function renderHistory() {
         }
       });
     }
+
+    // Hide 🗑 on small cards — it only makes sense in the fullscreen lightbox
+    const delBtn = card.querySelector('[data-action="hc-delete"]');
+    if (delBtn) delBtn.style.display = card.clientWidth > 280 ? '' : 'none';
 
     // Highlight card if it's selected for comparison
     if (_compareMode) {

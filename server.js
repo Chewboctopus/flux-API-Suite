@@ -1,6 +1,6 @@
 import express from 'express';
 import multer from 'multer';
-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join, extname } from 'path';
 import { randomUUID } from 'crypto';
@@ -706,6 +706,42 @@ app.delete('/api/history', (_req, res) => {
   writeFileSync(HISTORY_FILE, '[]');
   writeFileSync(CSV_FILE, 'id,timestamp,tool,model,prompt,width,height,seed,output_format,cost_credits,image_url\n');
   res.json({ ok: true });
+});
+
+// Single entry deletion
+app.delete('/api/history/:id', (req, res) => {
+  const id = req.params.id;
+  try {
+    const h = loadHistoryCache();
+    const entry = h.find(e => e.id === id);
+    let fileDeleted = false;
+
+    if (entry?.local_file) {
+      const fpath = join(OUTPUTS_DIR, entry.local_file);
+      if (existsSync(fpath)) {
+        unlinkSync(fpath);
+        fileDeleted = true;
+      }
+    }
+
+    const idx = h.findIndex(e => e.id === id);
+    if (idx !== -1) h.splice(idx, 1);
+    writeFileSync(HISTORY_FILE, JSON.stringify(h, null, 2));
+
+    // Remove from CSV too (read → filter → write back)
+    let csvLines;
+    try { csvLines = readFileSync(CSV_FILE, 'utf8').split('\n'); } catch { csvLines = []; }
+    if (csvLines.length > 1) {
+      const header = csvLines[0];
+      const body = csvLines.slice(1).filter(l => !l.startsWith(id + ','));
+      writeFileSync(CSV_FILE, [header, ...body].join('\n'));
+    }
+
+    _historyCache = h;
+    res.json({ ok: true, file: fileDeleted });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ─── CSV Download ──────────────────────────────────────────────────────────────
