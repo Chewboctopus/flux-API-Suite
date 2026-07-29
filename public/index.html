@@ -27,7 +27,8 @@
       <input type="password" id="input-topazkey" placeholder="your-topaz-api-key" autocomplete="off" spellcheck="false">
       <p class="apikey-note" style="margin-top:4px;text-align:left">Get a key at <a href="https://account.topazlabs.com/manage-api" target="_blank">account.topazlabs.com</a></p>
     </div>
-    <div class="apikey-actions">
+    <div class="apikey-actions" style="flex-direction: row;">
+      <button class="btn btn-secondary btn-full" id="btn-cancel-key" style="display:none">Cancel</button>
       <button class="btn btn-primary btn-full" id="btn-connect">Connect →</button>
     </div>
     <p class="apikey-note">Keys stored in browser only. Never sent to any server except their respective APIs.</p>

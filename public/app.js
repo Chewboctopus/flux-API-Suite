@@ -123,7 +123,18 @@ class UploadZone {
       e.preventDefault();
       this.zone.classList.remove('drag-over');
       const f = e.dataTransfer.files[0];
-      if (f && f.type.startsWith('image/')) this._handleFile(f);
+      if (f && f.type.startsWith('image/')) {
+        this._handleFile(f);
+      } else {
+        let url = e.dataTransfer.getData('URL') || e.dataTransfer.getData('text/uri-list');
+        if (url) {
+          url = url.split('\n')[0].trim();
+          fetch(url).then(r => r.blob()).then(b => {
+            b.name = 'dropped_image.png';
+            this._handleFile(b);
+          }).catch(() => toast('Could not load dropped image', 'error'));
+        }
+      }
     });
   }
 
@@ -1288,6 +1299,7 @@ document.getElementById('btn-connect').addEventListener('click', () => {
   
   document.getElementById('screen-apikey').classList.remove('active');
   document.getElementById('screen-app').classList.add('active');
+  document.getElementById('btn-cancel-key').style.display = 'none';
   
   if (API_KEY) {
     loadCredits();
@@ -1305,14 +1317,20 @@ document.getElementById('input-topazkey').addEventListener('keydown', e => {
 });
 
 document.getElementById('btn-changekey').addEventListener('click', () => {
-  API_KEY = '';
-  TOPAZ_KEY = '';
-  localStorage.removeItem('flux_api_key');
-  localStorage.removeItem('topaz_api_key');
   document.getElementById('screen-app').classList.remove('active');
   document.getElementById('screen-apikey').classList.add('active');
-  document.getElementById('input-apikey').value = '';
-  document.getElementById('input-topazkey').value = '';
+  document.getElementById('input-apikey').value = API_KEY;
+  document.getElementById('input-topazkey').value = TOPAZ_KEY;
+  document.getElementById('btn-cancel-key').style.display = '';
+});
+
+document.getElementById('btn-cancel-key').addEventListener('click', () => {
+  document.getElementById('screen-apikey').classList.remove('active');
+  document.getElementById('screen-app').classList.add('active');
+  document.getElementById('btn-cancel-key').style.display = 'none';
+  // Restore original input values in case they typed something but cancelled
+  document.getElementById('input-apikey').value = API_KEY;
+  document.getElementById('input-topazkey').value = TOPAZ_KEY;
 });
 
 // Auto-login if either key stored
@@ -1596,7 +1614,18 @@ function createRefSlot(i) {
   slot.addEventListener('drop', e => {
     e.preventDefault(); slot.classList.remove('drag-over');
     const f = e.dataTransfer.files[0];
-    if (f?.type.startsWith('image/')) handleFile(f);
+    if (f?.type.startsWith('image/')) {
+      handleFile(f);
+    } else {
+      let url = e.dataTransfer.getData('URL') || e.dataTransfer.getData('text/uri-list');
+      if (url) {
+        url = url.split('\n')[0].trim();
+        fetch(url).then(r => r.blob()).then(b => {
+          b.name = 'dropped_image.png';
+          handleFile(b);
+        }).catch(() => toast('Could not load dropped image', 'error'));
+      }
+    }
   });
 
   // ── Hover: show overlay immediately, popup after 1 s ──────────────────────
