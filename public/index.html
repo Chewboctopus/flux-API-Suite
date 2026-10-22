@@ -49,6 +49,7 @@
       <button class="tab-btn" data-tab="vto">Try-On</button>
       <button class="tab-btn" data-tab="deblur">Deblur</button>
       <button class="tab-btn" data-tab="upscale">Upscale</button>
+      <button class="tab-btn" data-tab="video">Video</button>
       <button class="tab-btn" data-tab="history">History</button>
     </nav>
     <div class="topbar-right">
@@ -56,7 +57,7 @@
       <div id="alltime-badge" class="credit-badge alltime-badge" title="Total credits spent with this API key (all history)">All Time: <span class="cval-alltime" id="alltime-spend">0 cr · $0.00</span></div>
       <div id="session-badge" class="credit-badge session-badge" title="Credits spent today (1 credit = $0.01)">Today: <span class="cval-spend" id="session-spend">0 cr · $0.00</span></div>
       <button class="btn btn-secondary btn-sm" id="btn-shortcuts" title="Keyboard shortcuts (?)">?</button>
-      <button class="btn btn-secondary btn-sm" id="btn-settings" title="Settings">⚙</button>
+      <button class="btn btn-secondary btn-sm" id="btn-settings" title="Settings (⌘ ,)">⚙ Settings</button>
       <button class="btn btn-secondary btn-sm" id="btn-changekey">Change Key</button>
     </div>
   </header>
@@ -74,8 +75,12 @@
               <div class="section-title">Model</div>
               <div class="field">
                 <select id="gen-model">
-                  <optgroup label="── FLUX.2 (Recommended) ──">
-                    <option value="flux-2-pro" selected>FLUX.2 [pro] — Recommended default</option>
+                  <optgroup label="── FLUX 3 (New) ──">
+                    <option value="flux-3-image" selected>FLUX 3 Image — Generate, edit, boxes, 4K</option>
+                    <option value="flux-3-image-klein">FLUX 3 Image Klein — Fast open weights</option>
+                  </optgroup>
+                  <optgroup label="── FLUX.2 ──">
+                    <option value="flux-2-pro">FLUX.2 [pro]</option>
                     <option value="flux-2-pro-preview">FLUX.2 [pro] Preview</option>
                     <option value="flux-2-max">FLUX.2 [max] — Highest quality</option>
                     <option value="flux-2-flex">FLUX.2 [flex] — Typography & text</option>
@@ -102,13 +107,53 @@
             </div>
 
             <div class="section">
-              <div class="section-title">Reference Images <span class="field-hint">(up to 8)</span></div>
+              <div class="section-title">Reference Images <span class="field-hint" id="gen-refs-hint">(up to 10)</span></div>
               <div class="refs-grid" id="gen-refs-grid">
                 <!-- Slots injected by JS -->
               </div>
             </div>
 
-            <div class="section">
+            <div class="section" id="gen-f3-section">
+              <div class="section-title">FLUX 3 Output</div>
+              <div class="field">
+                <div class="field-label">Aspect Ratio <span class="field-hint">auto follows the first reference</span></div>
+                <select id="gen-f3-ar">
+                  <option value="auto">Auto</option>
+                  <option value="1:1">1:1</option>
+                  <option value="16:9">16:9</option>
+                  <option value="9:16">9:16</option>
+                  <option value="21:9">21:9</option>
+                  <option value="9:21">9:21</option>
+                  <option value="2:1">2:1</option>
+                  <option value="1:2">1:2</option>
+                  <option value="3:2">3:2</option>
+                  <option value="2:3">2:3</option>
+                  <option value="4:3">4:3</option>
+                  <option value="3:4">3:4</option>
+                  <option value="5:4">5:4</option>
+                  <option value="4:5">4:5</option>
+                  <option value="7:5">7:5</option>
+                  <option value="5:7">5:7</option>
+                </select>
+              </div>
+              <div class="field">
+                <div class="field-label">Resolution</div>
+                <select id="gen-f3-res">
+                  <option value="768sq">768sq — fast preview</option>
+                  <option value="1k" selected>1k</option>
+                  <option value="1.5k">1.5k</option>
+                  <option value="2k">2k</option>
+                  <option value="4k">4k (~16 MP)</option>
+                </select>
+              </div>
+              <div class="toggle-row">
+                <span class="toggle-label">Grounding <span class="field-hint">web + image search</span></span>
+                <label class="toggle"><input type="checkbox" id="gen-f3-grounding" checked><span class="toggle-slider"></span></label>
+              </div>
+              <div class="field-hint" style="margin-top:6px">Edit by adding reference images and writing the change as an instruction ("Image 1 in the style of Image 2"). Bounding boxes: append a JSON list to the prompt. No seed, negative prompt or upsampling on FLUX 3.</div>
+            </div>
+
+            <div class="section" id="gen-size-section">
               <div class="section-title">Size</div>
               <div class="size-row">
                 <div class="field">
@@ -138,7 +183,7 @@
 
             <div class="section">
               <div class="section-title">Parameters</div>
-              <div class="field">
+              <div class="field" id="gen-seed-field">
                 <div class="field-label">Seed <span class="field-hint">blank = random</span></div>
                 <div class="seed-row">
                   <input type="number" id="gen-seed" placeholder="random">
@@ -146,7 +191,7 @@
                 </div>
               </div>
 
-              <div class="field">
+              <div class="field" id="gen-format-field">
                 <div class="field-label">Output Format</div>
                 <select id="gen-format">
                   <option value="png">PNG</option>
@@ -154,7 +199,7 @@
                   <option value="webp">WebP</option>
                 </select>
               </div>
-              <div class="toggle-row">
+              <div class="toggle-row" id="gen-upsampling-row">
                 <span class="toggle-label">Prompt Upsampling</span>
                 <label class="toggle"><input type="checkbox" id="gen-upsampling"><span class="toggle-slider"></span></label>
               </div>
@@ -534,6 +579,14 @@
               </div>
 
               <div class="field">
+                <div class="field-label">Model Version</div>
+                <select id="vto-version">
+                  <option value="v2" selected>vto-v2 — Better face preservation (recommended)</option>
+                  <option value="v1">vto-v1 — Legacy</option>
+                </select>
+              </div>
+
+              <div class="field">
                 <div class="field-label">Output Format</div>
                 <select id="vto-format">
                   <option value="png">PNG</option>
@@ -794,6 +847,131 @@
     </div>
 
     <!-- ─── HISTORY ───────────────────────────────────────────────────────── -->
+    <!-- ─── VIDEO (FLUX 3 Video / Video Edit / Video Upscale) ─────────────── -->
+    <div id="tab-video" class="tab-panel">
+      <div class="tool-layout">
+        <aside class="tool-sidebar">
+          <div class="tool-sidebar-inner">
+
+            <div class="section">
+              <div class="section-title">Mode</div>
+              <div class="field">
+                <select id="vid-mode">
+                  <option value="t2v">Text to Video</option>
+                  <option value="i2v">Image to Video (keyframes)</option>
+                  <option value="v2v">Extend a Clip (continuation)</option>
+                  <option value="edit">Edit a Clip (Video Edit)</option>
+                  <option value="upscale">Upscale a Clip (to 4K)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="section vid-only vid-i2v">
+              <div class="section-title">Keyframes <span class="field-hint">up to 10</span></div>
+              <div id="vid-kf-list"></div>
+              <div style="display:flex;gap:6px;margin-top:6px">
+                <button class="btn btn-secondary btn-sm" id="vid-kf-add">+ Add keyframe</button>
+                <button class="btn btn-secondary btn-sm" id="vid-kf-spread" title="Space the keyframes evenly across the duration">Spread evenly</button>
+              </div>
+              <div class="field-hint" style="margin-top:6px">1 image = opening frame. 2 = start + end. 3+ = ordered waypoints. Paste (⌘V) a frame to drop it into the next empty row. Fill the time column to pin frames to exact seconds. 3+ frames or any timestamp needs an explicit duration (not Auto).</div>
+            </div>
+
+            <div class="section vid-only vid-v2v vid-edit vid-upscale">
+              <div class="section-title">Source Clip <span class="field-hint" id="vid-src-hint"></span></div>
+              <div class="upload-zone" id="vid-src-upload" style="height:150px">
+                <input type="file" id="vid-src-file" accept="video/mp4,video/*">
+                <div class="uz-icon">🎬</div>
+                <div class="uz-text">Drop an mp4 clip</div>
+                <video id="vid-src-preview" style="display:none;position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none" muted loop></video>
+                <div class="uz-overlay"><span>Change Clip</span></div>
+              </div>
+            </div>
+
+            <div class="section vid-only vid-t2v vid-i2v vid-v2v vid-edit vid-upscale">
+              <div class="section-title" id="vid-prompt-title">Prompt</div>
+              <div class="field">
+                <textarea id="vid-prompt" rows="5" placeholder="Describe the shot, camera, action and any dialogue or sound…"></textarea>
+              </div>
+            </div>
+
+            <div class="section vid-only vid-t2v vid-i2v vid-v2v">
+              <div class="section-title">Output</div>
+              <div class="field">
+                <div class="field-label">Resolution</div>
+                <select id="vid-res">
+                  <option value="hd">HD (720p) — fastest</option>
+                  <option value="fhd">FHD (1080p)</option>
+                  <option value="qhd">QHD (2K)</option>
+                  <option value="uhd">UHD (4K)</option>
+                </select>
+              </div>
+              <div class="field">
+                <div class="field-label">Duration</div>
+                <select id="vid-duration">
+                  <option value="auto">Auto</option>
+                  <option value="5">5 s</option><option value="6">6 s</option><option value="7">7 s</option>
+                  <option value="8">8 s</option><option value="9">9 s</option><option value="10">10 s</option>
+                  <option value="12">12 s</option><option value="15">15 s</option><option value="20">20 s</option>
+                </select>
+              </div>
+              <div class="field">
+                <div class="field-label">Aspect Ratio</div>
+                <select id="vid-ar">
+                  <option value="auto">Auto</option>
+                  <option value="16:9">16:9</option><option value="9:16">9:16</option>
+                  <option value="1:1">1:1</option><option value="4:3">4:3</option><option value="3:4">3:4</option>
+                  <option value="21:9">21:9</option><option value="9:21">9:21</option><option value="2:1">2:1</option>
+                </select>
+              </div>
+              <div class="toggle-row">
+                <span class="toggle-label">Generate Audio</span>
+                <label class="toggle"><input type="checkbox" id="vid-audio" checked><span class="toggle-slider"></span></label>
+              </div>
+              <div class="toggle-row">
+                <span class="toggle-label">Draft <span class="field-hint">fast HD preview, enhance later</span></span>
+                <label class="toggle"><input type="checkbox" id="vid-draft"><span class="toggle-slider"></span></label>
+              </div>
+            </div>
+
+            <div class="section vid-only vid-upscale">
+              <div class="section-title">Upscale</div>
+              <div class="field">
+                <div class="field-label">Factor <span class="field-hint">1.5× – 3×, max ~14 MP per frame</span></div>
+                <input type="number" id="vid-up-factor" value="2" min="1.5" max="3" step="0.5">
+              </div>
+              <div class="field">
+                <div class="field-label">Mode</div>
+                <select id="vid-up-creativity">
+                  <option value="1">Creative — restores and invents detail (generated footage)</option>
+                  <option value="0">Precise — preserves source (faces, products)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="vid-note" id="vid-limits"></div>
+              <div class="vid-note vid-warn vid-hidden" id="vid-clip-warning"></div>
+            </div>
+
+          </div>
+          <div class="tool-sidebar-footer">
+            <button class="btn btn-primary btn-full" id="btn-video">&#10022; Generate Video</button>
+          </div>
+        </aside>
+
+        <div class="tool-main">
+          <div class="status-bar hidden" id="vid-status">
+            <div class="status-spinner"></div>
+            <span class="status-text" id="vid-status-text">Rendering video — this can take a few minutes…</span>
+            <span class="status-elapsed" id="vid-elapsed">0s</span>
+          </div>
+          <div class="results-area" id="vid-results">
+            <div class="results-placeholder"><div class="ph-icon">🎬</div><p>Videos will appear here</p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="tab-history" class="tab-panel">
       <div class="history-layout">
         <div class="history-toolbar">
@@ -810,6 +988,9 @@
             <option value="vto">VTO</option>
             <option value="deblur">Deblur</option>
             <option value="upscale">Upscale</option>
+            <option value="video">Video</option>
+            <option value="video-edit">Video Edit</option>
+            <option value="video-upscale">Video Upscale</option>
           </select>
           <input type="text" id="hist-search" placeholder="Search prompts…" style="width:200px;padding:5px 10px;font-size:12px">
           <button class="btn btn-secondary btn-sm" id="hist-refresh">↺ Refresh</button>
@@ -903,6 +1084,7 @@
           <button data-sendto="vto">👕 Try-On <span class="lb-sendto-hint">person slot</span></button>
           <button data-sendto="deblur">🔍 Deblur</button>
           <button data-sendto="upscale">🔬 Upscale <span class="lb-sendto-hint">Topaz</span></button>
+          <button data-sendto="video-i2v">🎬 Video <span class="lb-sendto-hint">start frame</span></button>
         </div>
       </div>
       <button class="btn btn-secondary btn-sm" id="lightbox-close">✕ Close</button>

@@ -19,6 +19,8 @@ const CSV_FILE     = join(DATA_DIR, 'generations.csv');
 
 mkdirSync(UPLOADS_DIR, { recursive: true });
 mkdirSync(OUTPUTS_DIR, { recursive: true });
+const DRAFTS_DIR = join(DATA_DIR, 'drafts');   // draft_cache bundles (.bin) for draft -> enhance
+mkdirSync(DRAFTS_DIR, { recursive: true });
 if (!existsSync(HISTORY_FILE)) writeFileSync(HISTORY_FILE, '[]');
 if (!existsSync(CSV_FILE))     writeFileSync(CSV_FILE, 'id,timestamp,tool,model,prompt,width,height,seed,output_format,cost_credits,image_url\n');
 const CONFIG_FILE  = join(DATA_DIR, 'config.json');
@@ -76,13 +78,32 @@ async function getB64(pathOrUrl, b64) {
   return null;
 }
 
+// Moderation is always run at the most permissive level each endpoint accepts
+// (0 = strictest). Maximums per BFL's errors reference: FLUX 3 Image/Video 4,
+// FLUX.2 + image tools 5, FLUX.1 generation 6. Higher values 422, so on a 422
+// naming safety_tolerance we step down one level and retry.
+function maxSafety(endpoint) {
+  if (endpoint.startsWith('flux-3-') || endpoint.startsWith('flux-tools/video-')) return 4;
+  if (endpoint.startsWith('flux-2-') || endpoint.startsWith('flux-tools/')) return 5;
+  return 6;
+}
+
 async function bflSubmit(endpoint, payload, apiKey) {
   const url = `${BFL_BASE}/${endpoint}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'x-key': apiKey },
-    body: JSON.stringify(payload),
-  });
+  payload = { ...payload, safety_tolerance: maxSafety(endpoint) };
+  let res;
+  for (;;) {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'x-key': apiKey },
+      body: JSON.stringify(payload),
+    });
+    if (res.status !== 422 || payload.safety_tolerance <= 0) break;
+    const peek = await res.clone().text();
+    if (!/safety_tolerance|safety tolerance/i.test(peek)) break;
+    payload = { ...payload, safety_tolerance: payload.safety_tolerance - 1 };
+    console.warn(`[bfl] ${endpoint}: safety_tolerance rejected, retrying at ${payload.safety_tolerance}`);
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     const msg = err.detail?.[0]?.msg || err.detail || err.message || `BFL ${res.status}`;
@@ -91,9 +112,9 @@ async function bflSubmit(endpoint, payload, apiKey) {
   return res.json();
 }
 
-async function bflPoll(pollingUrl, apiKey, maxTries = 180) {
+async function bflPoll(pollingUrl, apiKey, { maxTries = 180, intervalMs = 1000 } = {}) {
   for (let i = 0; i < maxTries; i++) {
-    await new Promise(r => setTimeout(r, 1000));
+    await new Promise(r => setTimeout(r, intervalMs));
     const res = await fetch(pollingUrl, { headers: { Accept: 'application/json', 'x-key': apiKey } });
     // Permanent auth/permission errors — stop immediately
     if (res.status === 401 || res.status === 403) {
@@ -102,17 +123,24 @@ async function bflPoll(pollingUrl, apiKey, maxTries = 180) {
     if (!res.ok) continue; // transient 5xx / 429 — keep polling
     const data = await res.json();
     if (data.status === 'Ready') return data;
+    if (data.status === 'Request Moderated' || data.status === 'Content Moderated') {
+      // BFL now returns the triggering categories in details["Moderation Reasons"]
+      const reasons = data.details?.['Moderation Reasons'];
+      const msg = `${data.status}` + (Array.isArray(reasons) && reasons.length ? `: ${reasons.join(', ')}` : '');
+      const e = new Error(msg); e.status = 422; e.details = data; throw e;
+    }
     if (data.status === 'Error' || data.status === 'Failed') {
       const e = new Error('Generation failed'); e.status = 500; e.details = data; throw e;
     }
   }
-  const e = new Error('Timed out after 3 minutes'); e.status = 504; throw e;
+  const e = new Error(`Timed out after ${Math.round(maxTries * intervalMs / 60000)} minutes`); e.status = 504; throw e;
 }
 
-async function runJob(endpoint, payload, apiKey) {
+async function runJob(endpoint, payload, apiKey, pollOpts) {
   const submit = await bflSubmit(endpoint, payload, apiKey);
-  const result = await bflPoll(submit.polling_url, apiKey);
-  return { taskId: submit.id, cost: submit.cost, result };
+  const result = await bflPoll(submit.polling_url, apiKey, pollOpts);
+  // Newer endpoints report the settled cost on the final polling response
+  return { taskId: submit.id, cost: result.cost ?? submit.cost, result };
 }
 
 async function saveOutput(imageUrl, genId, fmt) {
@@ -120,7 +148,9 @@ async function saveOutput(imageUrl, genId, fmt) {
   try {
     const res = await fetch(imageUrl);
     if (!res.ok) return null;
-    const ext = fmt === 'jpeg' ? 'jpg' : (fmt || 'jpg');
+    // FLUX 3 endpoints have no output_format; take the extension from the signed URL
+    const urlExt = (() => { try { return extname(new URL(imageUrl).pathname).slice(1).toLowerCase(); } catch { return ''; } })();
+    const ext = fmt === 'jpeg' ? 'jpg' : (fmt || urlExt || 'jpg');
     const filename = `${genId}.${ext}`;
     writeFileSync(join(OUTPUTS_DIR, filename), Buffer.from(await res.arrayBuffer()));
     return filename;
@@ -217,9 +247,47 @@ app.post('/api/generate', async (req, res) => {
     width, height, seed, output_format = 'png',
     safety_tolerance = 2, prompt_upsampling,
     webhook_url, webhook_secret,
+    aspect_ratio, resolution, grounding,   // FLUX 3 Image only
   } = req.body;
 
   if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
+
+  // FLUX 3 Image / Klein: one endpoint for generate + edit, own request shape
+  // (images[], aspect_ratio, resolution — no width/height, seed, output_format or upsampling).
+  if (model === 'flux-3-image' || model === 'flux-3-image-klein') {
+    const payload = {
+      prompt,
+      aspect_ratio: aspect_ratio || 'auto',
+      resolution: resolution || '1k',
+    };
+    if (grounding != null) payload.grounding = Boolean(grounding);
+    if (webhook_url) { payload.webhook_url = webhook_url; if (webhook_secret) payload.webhook_secret = webhook_secret; }
+
+    const refs = (await Promise.all([
+      ...ref_urls.map(u => getB64(u, null).catch(() => null)),
+      ...ref_b64s.map(b => getB64(null, b).catch(() => null)),
+    ])).filter(Boolean).slice(0, 10);
+    if (refs.length) payload.images = refs;
+
+    try {
+      const { cost, result } = await runJob(model, payload, apiKey);
+      const genId = makeId('gen');
+      const imageUrl = result.result?.sample;
+      const localFile = await saveOutput(imageUrl, genId, null);
+      const entry = {
+        id: genId, tool: 'generate', model, prompt,
+        aspect_ratio: payload.aspect_ratio, resolution: payload.resolution,
+        seed: result.result?.seed ?? null, cost: cost ?? null,
+        output_format: localFile ? extname(localFile).slice(1) : null,
+        local_file: localFile,
+        image_url: finalImageUrl(localFile, imageUrl),
+        ref_urls: ref_urls.filter(Boolean),
+        timestamp: new Date().toISOString(),
+      };
+      appendHistory(entry);
+      return res.json(entry);
+    } catch (e) { return handleError(res, e); }
+  }
 
   const payload = { prompt, safety_tolerance: Number(safety_tolerance), output_format };
   if (width)  payload.width  = Number(width);
@@ -232,7 +300,7 @@ app.post('/api/generate', async (req, res) => {
   const refs = (await Promise.all([
     ...ref_urls.map(u => getB64(u, null).catch(() => null)),
     ...ref_b64s.map(b => getB64(null, b).catch(() => null)),
-  ])).filter(Boolean);
+  ])).filter(Boolean).slice(0, 8); // FLUX.2 / legacy cap
   if (ref_urls.length > 0 && refs.length === 0) {
     console.warn('[generate] All reference images failed to load');
   }
@@ -409,7 +477,7 @@ app.post('/api/vto', async (req, res) => {
   const {
     person_url, person_b64,
     garment_url, garment_b64,
-    prompt, seed,
+    prompt, seed, vto_version = 'v2',
     output_format = 'png', safety_tolerance = 2,
   } = req.body;
 
@@ -427,12 +495,12 @@ app.post('/api/vto', async (req, res) => {
   if (seed != null && seed !== '') payload.seed = Number(seed);
 
   try {
-    const { cost, result } = await runJob('flux-tools/vto-v1', payload, apiKey);
+    const { cost, result } = await runJob(`flux-tools/${vto_version === 'v1' ? 'vto-v1' : 'vto-v2'}`, payload, apiKey);
     const genId = makeId('vto');
     const imageUrl = result.result?.sample;
     const localFile = await saveOutput(imageUrl, genId, output_format);
     const entry = {
-      id: genId, tool: 'vto', model: 'flux-tools/vto-v1', prompt,
+      id: genId, tool: 'vto', model: `flux-tools/${vto_version === 'v1' ? 'vto-v1' : 'vto-v2'}`, prompt,
       seed: result.result?.seed ?? (seed || null), cost, output_format,
       input_url: person_url || null,
       garment_url: garment_url || null,
@@ -475,6 +543,162 @@ app.post('/api/deblur', async (req, res) => {
     };
     appendHistory(entry);
     res.json(entry);
+  } catch (e) { handleError(res, e); }
+});
+
+// ─── Video: FLUX 3 Video / Video Edit / Video Upscale ─────────────────────────
+// Videos can be up to 50 MB, so they get their own (larger) upload limit.
+const videoUpload = multer({ storage, limits: { fileSize: 60 * 1024 * 1024 } });
+app.post('/api/upload-video', videoUpload.single('video'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file received' });
+  res.json({ url: `/uploads/${req.file.filename}`, name: req.file.originalname });
+});
+
+// Video jobs run for minutes: poll every 3s for up to 20 minutes.
+const VIDEO_POLL = { maxTries: 400, intervalMs: 3000 };
+
+async function finishVideo(res, { tool, model, prompt, cost, result, extra = {} }) {
+  const genId = makeId(tool);
+  const videoUrl = result.result?.sample;
+  // Delivery URLs expire after ~1 hour — download immediately
+  const localFile = await saveOutput(videoUrl, genId, null);
+  // A draft's draft_cache is a short-lived signed URL; enhancing later needs the
+  // bundle itself, so download it now and keep it next to the outputs.
+  let draftFile = null;
+  const draftUrl = result.result?.draft_cache || result.draft_cache;
+  if (draftUrl && /^https?:/.test(draftUrl)) {
+    try {
+      const r = await fetch(draftUrl);
+      if (r.ok) { draftFile = `${genId}.bin`; writeFileSync(join(DRAFTS_DIR, draftFile), Buffer.from(await r.arrayBuffer())); }
+    } catch (e) { console.error('Draft cache save failed:', e.message); }
+  }
+  const entry = {
+    id: genId, tool, model, prompt: prompt || '',
+    draft_cache_file: draftFile,
+    media: 'video',
+    cost: cost ?? null,
+    output_format: localFile ? extname(localFile).slice(1) : 'mp4',
+    local_file: localFile,
+    image_url: finalImageUrl(localFile, videoUrl),
+    timestamp: new Date().toISOString(),
+    ...extra,
+  };
+  appendHistory(entry);
+  res.json(entry);
+}
+
+app.post('/api/video/generate', async (req, res) => {
+  const apiKey = getKey(req);
+  if (!apiKey) return res.status(401).json({ error: 'Missing API key' });
+
+  const {
+    mode = 't2v', prompt,
+    keyframes = [],        // [{ url, time? }] — time in seconds pins a frame; omit for ordered start/end
+    start_video_url,       // v2v
+    draft_file, draft_cache,   // draft_enhance: saved bundle name (preferred) or legacy URL
+    resolution = 'hd', duration = 'auto', aspect_ratio = 'auto',
+    generate_audio = true, draft = false,
+    safety_tolerance = 2,
+  } = req.body;
+
+  if (mode === 'draft_enhance') {
+    // Only mode, draft_cache and resolution are accepted — prompt etc. are embedded in the bundle
+    try {
+      let cache = null;
+      if (draft_file) {
+        const f = join(DRAFTS_DIR, draft_file.replace(/[^\w.\-]/g, ''));
+        if (existsSync(f)) cache = readFileSync(f).toString('base64');
+      }
+      if (!cache && draft_cache) cache = draft_cache;   // legacy entries: signed URL, only valid ~1h
+      if (!cache) return res.status(400).json({ error: 'No saved draft bundle for this video. Re-run it with Draft on, then enhance.' });
+      const { cost, result } = await runJob('flux-3-video', { mode: 'draft_enhance', draft_cache: cache, resolution }, apiKey, VIDEO_POLL);
+      return await finishVideo(res, {
+        tool: 'video', model: 'flux-3-video', prompt, cost, result,
+        extra: { video_mode: 'draft_enhance', resolution, aspect_ratio, duration, generate_audio, is_draft: false, enhanced_from: draft_file || null },
+      });
+    } catch (e) { return handleError(res, e); }
+  }
+
+  if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
+
+  const payload = {
+    mode, prompt, resolution, aspect_ratio,
+    generate_audio: Boolean(generate_audio),
+  };
+  payload.duration = duration === 'auto' ? 'auto' : Number(duration);
+  if (draft && mode !== 'draft_enhance') payload.draft = true;
+
+  try {
+    if (mode === 'i2v') {
+      if (!keyframes.length) return res.status(400).json({ error: 'Image-to-video needs at least one keyframe' });
+      const timed = keyframes.some(k => k.time != null && k.time !== '');
+      const frames = await Promise.all(keyframes.map(async (k) => {
+        const b64 = await getB64(k.url, k.b64);
+        if (!b64) throw Object.assign(new Error('Could not load a keyframe image'), { status: 400 });
+        return timed ? [Number(k.time) || 0, b64] : b64;
+      }));
+      payload.keyframes = frames;
+    } else if (mode === 'v2v') {
+      const v = await getB64(start_video_url, null);
+      if (!v) return res.status(400).json({ error: 'No start video provided' });
+      payload.start_video = v;
+    } else if (mode === 'draft_enhance') {
+      if (!draft_cache) return res.status(400).json({ error: 'No draft_cache — enhance a draft generated in this app' });
+      payload.draft_cache = draft_cache;
+    }
+
+    const { cost, result } = await runJob('flux-3-video', payload, apiKey, VIDEO_POLL);
+    await finishVideo(res, {
+      tool: 'video', model: 'flux-3-video', prompt, cost, result,
+      extra: {
+        video_mode: mode, resolution, aspect_ratio, duration: payload.duration,
+        generate_audio: payload.generate_audio, is_draft: Boolean(payload.draft),
+        input_url: mode === 'v2v' ? start_video_url : (keyframes[0]?.url || null),
+      },
+    });
+  } catch (e) { handleError(res, e); }
+});
+
+app.post('/api/video/edit', async (req, res) => {
+  const apiKey = getKey(req);
+  if (!apiKey) return res.status(401).json({ error: 'Missing API key' });
+
+  const { video_url, prompt, safety_tolerance = 2 } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'Edit instruction is required' });
+
+  try {
+    const video = await getB64(video_url, null);
+    if (!video) return res.status(400).json({ error: 'No video provided' });
+    // Only video, prompt and safety_tolerance are accepted — anything else is a 422
+    const payload = { video, prompt };
+    const { cost, result } = await runJob('flux-tools/video-edit-v1', payload, apiKey, VIDEO_POLL);
+    await finishVideo(res, {
+      tool: 'video-edit', model: 'flux-tools/video-edit-v1', prompt, cost, result,
+      extra: { input_url: video_url },
+    });
+  } catch (e) { handleError(res, e); }
+});
+
+app.post('/api/video/upscale', async (req, res) => {
+  const apiKey = getKey(req);
+  if (!apiKey) return res.status(401).json({ error: 'Missing API key' });
+
+  const { video_url, prompt, upscale_factor = 2, creativity = 1, safety_tolerance = 2 } = req.body;
+
+  try {
+    const input_video = await getB64(video_url, null);
+    if (!input_video) return res.status(400).json({ error: 'No video provided' });
+    const payload = {
+      input_video,
+      upscale_factor: Math.max(1.5, Math.min(3, Number(upscale_factor))),
+      creativity: Number(creativity) ? 1 : 0,
+    };
+    if (prompt && payload.creativity === 1) payload.prompt = prompt;
+    const { cost, result } = await runJob('flux-tools/video-upscale-v1', payload, apiKey, VIDEO_POLL);
+    await finishVideo(res, {
+      tool: 'video-upscale', model: 'flux-tools/video-upscale-v1', prompt, cost, result,
+      extra: { input_url: video_url, upscale_factor: payload.upscale_factor, creativity: payload.creativity },
+    });
   } catch (e) { handleError(res, e); }
 });
 

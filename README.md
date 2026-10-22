@@ -1,6 +1,6 @@
 # FLUX Studio
 
-A full-featured local desktop app and web UI for the [Black Forest Labs FLUX API](https://bfl.ai). Enter your BFL API key and get instant access to every FLUX model — Generate, Inpaint, Erase, Outpaint, Virtual Try-On, and Deblur.
+A full-featured local desktop app and web UI for the [Black Forest Labs FLUX API](https://bfl.ai). Enter your BFL API key and get instant access to every FLUX model — Generate (FLUX 3), Inpaint, Erase, Outpaint, Virtual Try-On, Deblur, and Video.
 
 All images are saved locally. No cloud account needed.
 
@@ -50,12 +50,13 @@ The app is open source — you can review every line of code in this repo.
 
 | Tool | Model | What it does |
 |---|---|---|
-| **Generate** | FLUX.2 [pro/max/flex/klein], FLUX.1 legacy | Text-to-image with optional reference images (up to 8) |
+| **Generate** | FLUX 3 Image / Klein, FLUX.2 [pro/max/flex/klein], FLUX.1 legacy | Text-to-image and editing with reference images (up to 10 on FLUX 3), aspect ratio + 768sq–4K resolution, bounding boxes in the prompt |
 | **Inpaint** | FLUX.1 Fill [pro] | Paint a mask and reprompt that region |
 | **Erase** | FLUX Tools / Erase | Remove objects cleanly |
 | **Outpaint** | FLUX Tools / Outpainting | Expand the canvas in any direction |
-| **Try-On** | FLUX Tools / VTO | Virtual garment try-on |
+| **Try-On** | FLUX Tools / VTO v2 (v1 selectable) | Virtual garment try-on with better face preservation |
 | **Deblur** | FLUX Tools / Deblur | Restore sharp details from blurry images |
+| **Video** | FLUX 3 Video, Video Edit, Video Upscale | Text/image to video with audio (HD–4K), timestamped keyframes, clip extension, drafts + enhance, prompt-based clip editing, 1.5–3× video upscale |
 
 ---
 

@@ -870,6 +870,7 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px;
 .tool-badge.erase    { color: var(--error);  border-color: rgba(248,113,113,0.3); background: rgba(248,113,113,0.1); }
 .tool-badge.outpaint { color: var(--info);   border-color: rgba(96,165,250,0.3);  background: rgba(96,165,250,0.1); }
 .tool-badge.vto      { color: var(--success);border-color: rgba(74,222,128,0.3);  background: rgba(74,222,128,0.1); }
+.tool-badge.video, .tool-badge.video-edit, .tool-badge.video-upscale { color: #f472b6; border-color: rgba(244,114,182,0.3); background: rgba(244,114,182,0.1); }
 .tool-badge.deblur   { color: var(--warn);   border-color: rgba(251,191,36,0.3);  background: rgba(251,191,36,0.1); }
 
 .history-ts { font-size: 10px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
@@ -1286,3 +1287,22 @@ kbd {
 body:not(.is-electron) #settings-port-section,
 body:not(.is-electron) #settings-folder-section { display: none; }
 
+/* Video results */
+.result-card video, .history-card video { width: 100%; display: block; background: #000; }
+.vid-hidden { display: none !important; }
+
+.btn.enhancing { opacity: .85; cursor: progress; border-color: var(--accent); color: var(--accent-text); }
+
+.vid-note { font-size: 11.5px; line-height: 1.5; color: var(--text-secondary); background: rgba(96,165,250,0.07); border: 1px solid rgba(96,165,250,0.25); border-radius: var(--r-md); padding: 8px 10px; }
+.vid-note.vid-warn { color: var(--warn); background: rgba(251,191,36,0.08); border-color: rgba(251,191,36,0.35); margin-top: 6px; }
+
+/* "Send to" menus: cards clip their children (overflow:hidden), which cut the menu off on
+   narrow cards. While a menu is open let the card overflow, lift it above its neighbours,
+   and open the menu from the button's left edge so it stays inside the card's column. */
+.result-card:has(.rc-sendto-menu:not(.hidden)),
+.history-card:has(.rc-sendto-menu:not(.hidden)),
+.history-card:has(.hc-sendto-menu:not(.hidden)) { overflow: visible; position: relative; z-index: 40; }
+.result-card .rc-sendto-menu,
+.history-card .rc-sendto-menu,
+.history-card .hc-sendto-menu { left: 0; right: auto; min-width: 190px; }
+.result-card video, .history-card video { border-radius: var(--r-md) var(--r-md) 0 0; }

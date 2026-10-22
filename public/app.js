@@ -558,6 +558,56 @@ function escHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
+// ─── Video card (result grid + history) ───────────────────────────────────────
+function buildVideoCard(entry, { history = false } = {}) {
+  const card = document.createElement('div');
+  card.className = history ? 'history-card' : 'result-card';
+  const shortId = entry.id?.slice(-8) || '—';
+  const meta = [shortId, entry.cost != null ? `${entry.cost}cr` : '', entry.resolution, entry.duration && entry.duration !== 'auto' ? `${entry.duration}s` : '', entry.is_draft ? 'DRAFT' : ''].filter(Boolean).join(' · ');
+  const canEnhance = Boolean(entry.is_draft && (entry.draft_cache_file || entry.draft_cache));
+  const ts = new Date(entry.timestamp).toLocaleString(undefined, { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+
+  card.innerHTML = `
+    <video src="${escHtml(entry.image_url)}" controls loop preload="metadata" playsinline></video>
+    <div class="${history ? 'history-card-body' : 'result-card-body'}">
+      ${history ? `<div class="history-card-prompt">${escHtml(entry.prompt) || '(no prompt)'}</div>
+        <div class="history-meta-row"><span class="tool-badge ${escHtml(entry.tool)}">${escHtml(entry.tool)}</span><span class="history-ts">${ts} ${entry.cost != null ? entry.cost + 'cr' : ''}</span></div>`
+        : `<div class="result-meta">${escHtml(meta)}</div>`}
+      <div class="${history ? 'history-actions' : 'result-actions'}">
+        <a class="btn btn-secondary ${history ? 'btn-sm' : ''}" href="${escHtml(entry.image_url)}" download>↓</a>
+        ${canEnhance ? `<button class="btn btn-secondary ${history ? 'btn-sm' : ''}" data-action="enhance" data-enhance-id="${escHtml(entry.id)}" title="Re-render this draft at full quality (billed)">✦ Enhance</button>` : ''}
+        <div class="rc-sendto-wrap">
+          <button class="btn btn-primary btn-sm" data-action="sendto">Send to ▾</button>
+          <div class="lb-sendto-menu hidden rc-sendto-menu">
+            <button data-sendto="video-v2v">➡ Extend <span class="lb-sendto-hint">continuation</span></button>
+            <button data-sendto="video-edit">✏ Video Edit</button>
+            <button data-sendto="video-upscale">🔬 Video Upscale</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  const menu = card.querySelector('.rc-sendto-menu');
+  card.querySelector('[data-action=sendto]').addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.rc-sendto-menu').forEach(m => { if (m !== menu) m.classList.add('hidden'); });
+    menu.classList.toggle('hidden');
+    if (!menu.classList.contains('hidden')) placeSendToMenu(e.currentTarget, menu);
+  });
+  menu.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-sendto]');
+    if (!btn) return;
+    menu.classList.add('hidden');
+    sendToTool(btn.dataset.sendto, entry.image_url, entry);
+  });
+  card.querySelector('[data-action=enhance]')?.addEventListener('click', () => enhanceDraft(entry));
+  if (ENHANCING.has(entry.id)) {   // card re-rendered mid-enhance (card isn't in the DOM yet)
+    const eb = card.querySelector('[data-action=enhance]');
+    if (eb) { eb.disabled = true; eb.classList.add('enhancing'); eb.textContent = '⏳ Enhancing…'; }
+  }
+  return card;
+}
+
 // Decide which way a "Send to" dropdown opens. It's anchored above its trigger by
 // default, but result/history cards sit at the top of the grid where there's no room
 // above — the menu would clip into the top nav. Flip it below when above is too tight.
@@ -572,6 +622,7 @@ function placeSendToMenu(triggerBtn, menu) {
 
 // ─── Result card builder ──────────────────────────────────────────────────────
 function buildResultCard(entry, onSendInpaint, onSendGenerate) {
+  if (entry.media === 'video') return buildVideoCard(entry);
   const card = document.createElement('div');
   card.className = 'result-card';
   const shortId = entry.id?.slice(-8) || '—';
@@ -600,6 +651,7 @@ function buildResultCard(entry, onSendInpaint, onSendGenerate) {
             <button data-sendto="vto">👕 Try-On</button>
             <button data-sendto="deblur">🔍 Deblur</button>
             <button data-sendto="upscale">🔬 Upscale <span class="lb-sendto-hint">Topaz</span></button>
+            <button data-sendto="video-i2v">🎬 Video <span class="lb-sendto-hint">start frame</span></button>
           </div>
         </div>
       </div>
@@ -676,6 +728,7 @@ function _lbSizePanelToEntry(entry) {
 }
 
 function openLightbox(entry, contextList, contextIndex) {
+  if (entry?.media === 'video') { window.open(entry.image_url, '_blank'); return; }
 
   _lightboxEntry = entry;
   _lbAbState = 'generated';
@@ -878,10 +931,30 @@ function reloadEntrySettings(e) {
   const set = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.value = val; };
   const setCheck = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.checked = !!val; };
 
+  if (e.media === 'video') {
+    switchTab('video');
+    const modeMap = { video: e.video_mode || 't2v', 'video-edit': 'edit', 'video-upscale': 'upscale' };
+    setVidMode(modeMap[e.tool] || 't2v');
+    set('vid-prompt', e.prompt);
+    if (e.tool === 'video') {
+      set('vid-res', e.resolution); set('vid-ar', e.aspect_ratio);
+      if (e.duration != null) set('vid-duration', String(e.duration));
+      setCheck('vid-audio', e.generate_audio);
+    }
+    if (e.input_url) {
+      if (e.video_mode === 'i2v') setTimeout(() => vidKf1UZ.setFromUrl(e.input_url), 150);
+      else setTimeout(() => vidSrcZ.setFromUrl(e.input_url), 150);
+    }
+    toast('↺ Settings restored to video tab', 'info');
+    return;
+  }
+
   switchTab(e.tool || 'generate');
 
   if (e.tool === 'generate' || !e.tool) {
-    if (e.model)  set('gen-model', e.model);
+    if (e.model)  { set('gen-model', e.model); applyGenModel(); }
+    if (e.aspect_ratio) set('gen-f3-ar', e.aspect_ratio);
+    if (e.resolution)   set('gen-f3-res', e.resolution);
     if (e.prompt) set('gen-prompt', e.prompt);
     if (e.width)  set('gen-width', e.width);
     if (e.height) set('gen-height', e.height);
@@ -1106,6 +1179,10 @@ function sendToTool(tool, imageUrl, entry) {
     vto:      () => { switchTab('vto');      setTimeout(() => vtoPersonUZ.setFromUrl(imageUrl), 120); },
     deblur:   () => { switchTab('deblur');   setTimeout(() => deblurUZ.setFromUrl(imageUrl),  120); },
     upscale:  () => { switchTab('upscale');  setTimeout(() => upscaleUZ.setFromUrl(imageUrl), 120); },
+    'video-i2v':     () => { switchTab('video'); setVidMode('i2v');     setTimeout(() => vidKf1UZ.setFromUrl(imageUrl), 120); },
+    'video-v2v':     () => { switchTab('video'); setVidMode('v2v');     setTimeout(() => vidSrcZ.setFromUrl(imageUrl), 120); },
+    'video-edit':    () => { switchTab('video'); setVidMode('edit');    setTimeout(() => vidSrcZ.setFromUrl(imageUrl), 120); },
+    'video-upscale': () => { switchTab('video'); setVidMode('upscale'); setTimeout(() => vidSrcZ.setFromUrl(imageUrl), 120); },
   };
 
   if (actions[tool]) {
@@ -1262,7 +1339,7 @@ function updateTabAvailability() {
   }
 
   // Check BFL tabs
-  const bflTabs = ['generate', 'inpaint', 'erase', 'outpaint', 'vto', 'deblur'];
+  const bflTabs = ['generate', 'inpaint', 'erase', 'outpaint', 'vto', 'deblur', 'video'];
   bflTabs.forEach(tab => {
     const btn = document.getElementById(tab === 'vto' ? 'btn-vto' : (tab === 'generate' ? 'btn-generate' : `btn-${tab}`));
     if (btn) {
@@ -1689,9 +1766,22 @@ function createRefSlot(i) {
   refsGrid.appendChild(slot);
 }
 
-for (let i = 0; i < 8; i++) createRefSlot(i);
+for (let i = 0; i < 10; i++) createRefSlot(i);
 
 // Aspect ratio presets
+// ─── FLUX 3 vs legacy model controls ──────────────────────────────────────────
+const isFlux3Model = (m) => m === 'flux-3-image' || m === 'flux-3-image-klein';
+function applyGenModel() {
+  const f3 = isFlux3Model(document.getElementById('gen-model').value);
+  document.getElementById('gen-f3-section').classList.toggle('vid-hidden', !f3);
+  ['gen-size-section', 'gen-seed-field', 'gen-format-field', 'gen-upsampling-row']
+    .forEach(id => document.getElementById(id)?.classList.toggle('vid-hidden', f3));
+  document.getElementById('gen-refs-hint').textContent = f3 ? '(up to 10)' : '(up to 8)';
+  // FLUX 3 has no seed — the batch must not pass a fake one
+}
+document.getElementById('gen-model').addEventListener('change', applyGenModel);
+applyGenModel();
+
 // ─── Aspect ratio lock + size scale presets ───────────────────────────────────
 const _gW   = () => document.getElementById('gen-width');
 const _gH   = () => document.getElementById('gen-height');
@@ -1816,6 +1906,9 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     output_format:     document.getElementById('gen-format').value,
     safety_tolerance:  5,
     prompt_upsampling: document.getElementById('gen-upsampling').checked,
+    aspect_ratio:      document.getElementById('gen-f3-ar').value,
+    resolution:        document.getElementById('gen-f3-res').value,
+    grounding:         document.getElementById('gen-f3-grounding').checked,
     webhook_url:       document.getElementById('gen-webhook').value || undefined,
     webhook_secret:    document.getElementById('gen-webhook-secret').value || undefined,
   }));
@@ -2409,6 +2502,7 @@ document.getElementById('btn-vto').addEventListener('click', async () => {
       person_url:       vtoPersonUZ.url,
       garment_url:      vtoGarmentUZ.url,
       prompt:           document.getElementById('vto-prompt').value,
+      vto_version:      document.getElementById('vto-version').value,
       seed:             document.getElementById('vto-seed').value || undefined,
       output_format:    document.getElementById('vto-format').value,
       safety_tolerance: 5,
@@ -2836,6 +2930,292 @@ function renderSingleResult(containerId, entry) {
   grid.prepend(card);
 }
 
+// ─── VIDEO tab ────────────────────────────────────────────────────────────────
+// A clip upload zone: same contract as UploadZone (url / setFromUrl / clear) but
+// posts to /api/upload-video and previews in a <video> element.
+class VideoZone {
+  constructor(zoneId, fileId, previewId) {
+    this.zone    = document.getElementById(zoneId);
+    this.input   = document.getElementById(fileId);
+    this.preview = document.getElementById(previewId);
+    this.url     = null;
+    this.input.addEventListener('change', e => this._handle(e.target.files[0]));
+    this.zone.addEventListener('click', e => { if (e.target !== this.input) { e.stopPropagation(); this.input.click(); } });
+    this.zone.addEventListener('dragover', e => { e.preventDefault(); this.zone.classList.add('drag-over'); });
+    this.zone.addEventListener('dragleave', () => this.zone.classList.remove('drag-over'));
+    this.zone.addEventListener('drop', e => {
+      e.preventDefault(); this.zone.classList.remove('drag-over');
+      const f = e.dataTransfer.files[0];
+      if (f && f.type.startsWith('video/')) this._handle(f);
+    });
+  }
+  _show(src) {
+    this.meta = null;
+    this.preview.onloadedmetadata = () => {
+      this.meta = { duration: this.preview.duration, w: this.preview.videoWidth, h: this.preview.videoHeight };
+      this.onMeta?.(this.meta);
+    };
+    this.preview.src = src;
+    this.preview.style.display = 'block';
+    this.preview.play?.().catch(() => {});
+    this.zone.classList.add('has-image');
+  }
+  async _handle(file) {
+    if (!file) return;
+    if (file.size > 50 * 1024 * 1024) { toast('Clip is over 50 MB — BFL will reject it', 'warn'); }
+    this._show(URL.createObjectURL(file));
+    const fd = new FormData();
+    fd.append('video', file);
+    try {
+      const res = await fetch('/api/upload-video', { method: 'POST', body: fd });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Upload failed');
+      this.url = (await res.json()).url;
+      this.onUrl?.(this.url);
+    } catch (e) { toast('Upload failed: ' + e.message, 'error'); }
+  }
+  setFromUrl(url) { this.url = url; this._show(url); this.onUrl?.(url); }
+}
+
+// Keyframe rows: each is a small image slot plus an optional timestamp (seconds).
+const VID_KF = [];   // { uz: UploadZone, timeEl: HTMLInputElement, row: HTMLElement }
+let _kfSeq = 0;
+let _kfFocus = null;   // last-clicked keyframe row: paste target when every row is full
+function addKeyframeRow() {
+  if (VID_KF.length >= 10) { toast('FLUX 3 allows up to 10 keyframes', 'warn'); return null; }
+  const n = ++_kfSeq;
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:6px';
+  row.innerHTML = `
+    <span class="field-hint" style="width:16px;text-align:right" data-idx></span>
+    <div class="upload-zone" id="vid-kf${n}-upload" style="height:64px;width:96px;flex:none">
+      <input type="file" id="vid-kf${n}-file" accept="image/*">
+      <div class="uz-icon" style="font-size:16px">🎞</div>
+      <img id="vid-kf${n}-preview" style="display:none">
+      <div class="uz-overlay"><span>Change</span></div>
+    </div>
+    <input type="number" min="0" step="0.5" placeholder="time s" title="Pin to this second (optional)" style="width:78px">
+    <button class="btn-icon" title="Remove keyframe">✕</button>`;
+  document.getElementById('vid-kf-list').appendChild(row);
+  const entry = { uz: new UploadZone(`vid-kf${n}-upload`, `vid-kf${n}-file`, `vid-kf${n}-preview`), timeEl: row.querySelector('input[type=number]'), row };
+  entry.uz.onChange = () => saveVidState();
+  entry.timeEl.addEventListener('input', () => saveVidState());
+  row.querySelector('.btn-icon').addEventListener('click', () => {
+    if (VID_KF.length <= 1) { entry.uz.clear(); entry.timeEl.value = ''; saveVidState(); return; }
+    VID_KF.splice(VID_KF.indexOf(entry), 1); row.remove(); renumberKeyframes(); saveVidState();
+  });
+  row.addEventListener('mousedown', () => { _kfFocus = entry; });
+  VID_KF.push(entry); renumberKeyframes();
+  return entry;
+}
+function renumberKeyframes() { VID_KF.forEach((k, i) => { k.row.querySelector('[data-idx]').textContent = i + 1; }); }
+function spreadKeyframes() {
+  const dur = Number(document.getElementById('vid-duration').value);
+  if (!dur) { toast('Pick an explicit duration first', 'warn'); return; }
+  const n = VID_KF.length;
+  VID_KF.forEach((k, i) => { k.timeEl.value = n > 1 ? +(i * dur / (n - 1)).toFixed(2) : 0; });
+}
+document.getElementById('vid-kf-add').addEventListener('click', addKeyframeRow);
+document.getElementById('vid-kf-spread').addEventListener('click', spreadKeyframes);
+addKeyframeRow();
+// Back-compat handle used by Send-to / reload: "set the start frame"
+const vidKf1UZ = { setFromUrl: (u) => VID_KF[0].uz.setFromUrl(u) };
+const vidSrcZ  = new VideoZone('vid-src-upload', 'vid-src-file', 'vid-src-preview');
+
+const VID_MODES = {
+  t2v:     { btn: 'Generate Video', prompt: 'Prompt',           hint: '',                         limits: 'Up to 20 s with synchronized audio. HD → UHD (4K). Price is per second of output.' },
+  i2v:     { btn: 'Animate',        prompt: 'Prompt',           hint: '',                         limits: 'One image opens the clip; two pin both ends; 3–10 become a storyboard the shot passes through.' },
+  v2v:     { btn: 'Extend Clip',    prompt: 'What happens next', hint: '(continues from the last frames)', limits: 'Continuation is limited to 15 s.' },
+  edit:    { btn: 'Edit Clip',      prompt: 'Edit instruction', hint: '(≤ 15 s, ≤ 50 MB)',        limits: 'Edits with words only: no image or video references, no masks. Output follows the source (length, framing, audio) and is capped at 720p; larger clips are downscaled. Clips over 15 s are rejected. New dialogue must fit the length of the line it replaces. Billed per second of output.' },
+  upscale: { btn: 'Upscale Clip',   prompt: 'Prompt (creative mode only)', hint: '(≤ 20 s, ≤ 2560×1440, ≤ 50 MB)', limits: 'Output keeps the source aspect ratio and original audio, up to 4K. Source max 20 s, 2560×1440, 50 MB. Rejected clips are not charged. Billed per megapixel-second.' },
+};
+
+function setVidMode(mode) {
+  const sel = document.getElementById('vid-mode');
+  if (sel.value !== mode) sel.value = mode;
+  document.querySelectorAll('#tab-video .vid-only').forEach(el =>
+    el.classList.toggle('vid-hidden', !el.classList.contains(`vid-${mode}`)));
+  const m = VID_MODES[mode];
+  document.getElementById('btn-video').innerHTML = `&#10022; ${m.btn}`;
+  document.getElementById('vid-prompt-title').textContent = m.prompt;
+  document.getElementById('vid-src-hint').textContent = m.hint;
+  document.getElementById('vid-limits').textContent = m.limits;
+  // Prompt is optional for upscale
+  document.getElementById('vid-prompt').closest('.section').classList.toggle('vid-hidden', false);
+}
+// Clip limits per mode (seconds, max long side px) — checked on load and before submit
+const VID_CLIP_LIMITS = { edit: { sec: 15, label: 'Video Edit' }, upscale: { sec: 20, label: 'Video Upscale', w: 2560, h: 1440 }, v2v: { label: 'Extend' } };
+function clipProblem(mode) {
+  const lim = VID_CLIP_LIMITS[mode], m = vidSrcZ.meta;
+  if (!lim || !m) return null;
+  if (lim.sec && m.duration > lim.sec + 0.05) return `${lim.label} accepts clips up to ${lim.sec} s (this one is ${m.duration.toFixed(1)} s). Trim it first; BFL rejects, not trims.`;
+  if (lim.w && (Math.max(m.w, m.h) > lim.w || Math.min(m.w, m.h) > lim.h)) return `${lim.label} sources can be at most ${lim.w}×${lim.h} (this clip is ${m.w}×${m.h}).`;
+  if (mode === 'edit' && Math.min(m.w, m.h) < 160) return 'Video Edit needs at least 160 px on each side.';
+  return null;
+}
+function showClipWarning() {
+  const mode = document.getElementById('vid-mode').value;
+  const box = document.getElementById('vid-clip-warning');
+  const msg = clipProblem(mode);
+  box.textContent = msg ? '⚠ ' + msg : '';
+  box.classList.toggle('vid-hidden', !msg);
+}
+vidSrcZ.onMeta = showClipWarning;
+document.getElementById('vid-mode').addEventListener('change', e => { setVidMode(e.target.value); showClipWarning(); });
+setVidMode('t2v');
+
+// Drafts currently being enhanced: id -> start time. Survives tab switches and
+// history re-renders, and blocks repeat clicks (each enhance is billed).
+const ENHANCING = new Map();
+setInterval(() => {
+  document.querySelectorAll('[data-enhance-id]').forEach(btn => {
+    const t0 = ENHANCING.get(btn.dataset.enhanceId);
+    if (t0 == null) return;
+    btn.textContent = `⏳ Enhancing… ${Math.round((Date.now() - t0) / 1000)}s`;
+  });
+}, 1000);
+
+function _setEnhanceBtns(id, busy) {
+  document.querySelectorAll(`[data-enhance-id="${id}"]`).forEach(btn => {
+    btn.disabled = busy;
+    btn.classList.toggle('enhancing', busy);
+    if (!busy) btn.textContent = '✦ Enhance';
+    else btn.textContent = '⏳ Enhancing… 0s';
+  });
+}
+
+async function enhanceDraft(entry) {
+  if (ENHANCING.has(entry.id)) { toast('Already enhancing this draft — one request is in flight', 'warn'); return; }
+  ENHANCING.set(entry.id, Date.now());
+  _setEnhanceBtns(entry.id, true);
+  const res = document.getElementById('vid-res').value;
+  toast(`✦ Enhance request sent (${res.toUpperCase()}) — rendering takes a few minutes. Don't click again; the result will appear in the Video tab and History.`, 'info', 9000);
+  showStatus('vid-status', 'vid-status-text', 'Enhancing draft at full quality…');
+  const stopTimer = startTimer(document.getElementById('vid-elapsed'));
+  try {
+    const out = await apiFetch('/api/video/generate', {
+      mode: 'draft_enhance', prompt: entry.prompt, draft_file: entry.draft_cache_file, draft_cache: entry.draft_cache,
+      resolution: res,
+      aspect_ratio: entry.aspect_ratio, duration: entry.duration, generate_audio: entry.generate_audio,
+    });
+    renderSingleResult('vid-results', out);
+    addSessionCost(out.cost); loadCredits();
+    toast(`✓ Draft enhanced (${out.cost ?? '?'}cr) — saved to the Video tab and History`, 'success', 8000);
+  } catch (e) { toast(e.message, 'error', 8000); }
+  finally {
+    stopTimer(); hideStatus('vid-status');
+    ENHANCING.delete(entry.id); _setEnhanceBtns(entry.id, false);
+  }
+}
+
+document.getElementById('btn-video').addEventListener('click', async () => {
+  const mode   = document.getElementById('vid-mode').value;
+  const prompt = document.getElementById('vid-prompt').value.trim();
+  if (mode !== 'upscale' && !prompt) { toast('Enter a prompt', 'warn'); return; }
+  let keyframes = null;
+  if (mode === 'i2v') {
+    const frames = VID_KF.filter(k => k.uz.url);
+    if (!frames.length) { toast('Upload at least a start frame', 'warn'); return; }
+    const dur = Number(document.getElementById('vid-duration').value) || 0;
+    const anyTime = frames.some(k => k.timeEl.value !== '');
+    if ((anyTime || frames.length >= 3) && !dur) { toast('3+ keyframes or timestamps need an explicit duration (not Auto)', 'warn'); return; }
+    keyframes = frames.map((k, i) => {
+      let time;
+      if (anyTime) {
+        time = k.timeEl.value !== '' ? Number(k.timeEl.value)
+             : (frames.length > 1 ? +(i * dur / (frames.length - 1)).toFixed(2) : 0);
+        if (time < 0 || time > dur) { toast(`Keyframe ${i + 1} time must be between 0 and ${dur}s`, 'warn'); keyframes = null; }
+      }
+      return { url: k.uz.url, time };
+    });
+    if (!keyframes || keyframes.some(k => k.time != null && (k.time < 0 || k.time > dur))) return;
+    if (anyTime && keyframes.some((k, i) => i && k.time <= keyframes[i - 1].time)) { toast('Keyframe times must increase', 'warn'); return; }
+  }
+  if (['v2v', 'edit', 'upscale'].includes(mode) && !vidSrcZ.url) { toast('Upload a source clip', 'warn'); return; }
+  const problem = clipProblem(mode);
+  if (problem) { toast(problem, 'error', 9000); return; }
+
+  const common = {
+    resolution:   document.getElementById('vid-res').value,
+    duration:     document.getElementById('vid-duration').value,
+    aspect_ratio: document.getElementById('vid-ar').value,
+    generate_audio: document.getElementById('vid-audio').checked,
+    draft:        document.getElementById('vid-draft').checked,
+  };
+  let path, body;
+  if (mode === 'edit')         { path = '/api/video/edit';    body = { video_url: vidSrcZ.url, prompt }; }
+  else if (mode === 'upscale') { path = '/api/video/upscale'; body = { video_url: vidSrcZ.url, prompt,
+                                   upscale_factor: document.getElementById('vid-up-factor').value,
+                                   creativity: document.getElementById('vid-up-creativity').value }; }
+  else {
+    path = '/api/video/generate';
+    body = { mode, prompt, ...common };
+    if (mode === 'i2v') body.keyframes = keyframes;
+    if (mode === 'v2v') body.start_video_url = vidSrcZ.url;
+  }
+
+  const btn = document.getElementById('btn-video');
+  btn.disabled = true;
+  showStatus('vid-status', 'vid-status-text', 'Rendering video — this can take a few minutes…');
+  const stopTimer = startTimer(document.getElementById('vid-elapsed'));
+  try {
+    const entry = await apiFetch(path, body);
+    renderSingleResult('vid-results', entry);
+    addSessionCost(entry.cost); loadCredits();
+    toast(entry.is_draft ? 'Draft ready — hit Enhance to finish it' : 'Video ready!', 'success');
+  } catch (e) {
+    toast(e.message, 'error', 8000);
+  } finally {
+    stopTimer(); hideStatus('vid-status'); btn.disabled = false;
+  }
+});
+
+// ─── Video tab: remember inputs between launches ──────────────────────────────
+// Uploaded clips/frames already live on disk (uploads folder); this keeps the
+// *references* to them plus the prompt and settings in localStorage.
+const VID_STATE_KEY = 'flux_video_tab_state';
+const VID_FIELDS = ['vid-prompt', 'vid-res', 'vid-duration', 'vid-ar', 'vid-up-factor', 'vid-up-creativity'];
+const VID_CHECKS = ['vid-audio', 'vid-draft'];
+let _vidRestoring = false;
+
+function saveVidState() {
+  if (_vidRestoring) return;
+  try {
+    const st = { mode: document.getElementById('vid-mode').value, src: vidSrcZ.url || null,
+      kf: VID_KF.filter(k => k.uz.url).map(k => ({ url: k.uz.url, time: k.timeEl.value })), f: {}, c: {} };
+    VID_FIELDS.forEach(id => { st.f[id] = document.getElementById(id).value; });
+    VID_CHECKS.forEach(id => { st.c[id] = document.getElementById(id).checked; });
+    localStorage.setItem(VID_STATE_KEY, JSON.stringify(st));
+  } catch {}
+}
+
+async function restoreVidState() {
+  let st; try { st = JSON.parse(localStorage.getItem(VID_STATE_KEY) || 'null'); } catch {}
+  if (!st) return;
+  _vidRestoring = true;
+  try {
+    Object.entries(st.f || {}).forEach(([id, v]) => { const el = document.getElementById(id); if (el && v != null) el.value = v; });
+    Object.entries(st.c || {}).forEach(([id, v]) => { const el = document.getElementById(id); if (el) el.checked = !!v; });
+    if (st.mode) { document.getElementById('vid-mode').value = st.mode; setVidMode(st.mode); }
+    // Only restore files that still exist on disk
+    const exists = async (u) => { try { return (await fetch(u, { method: 'HEAD' })).ok; } catch { return false; } };
+    if (st.src && await exists(st.src)) vidSrcZ.setFromUrl(st.src);
+    for (const [i, k] of (st.kf || []).entries()) {
+      if (!(await exists(k.url))) continue;
+      const row = VID_KF.find(r => !r.uz.url) || addKeyframeRow();
+      if (!row) break;
+      row.uz.setFromUrl(k.url); row.timeEl.value = k.time ?? '';
+    }
+  } finally { _vidRestoring = false; }
+  showClipWarning();
+}
+
+[...VID_FIELDS, ...VID_CHECKS, 'vid-mode'].forEach(id => {
+  const el = document.getElementById(id);
+  el.addEventListener('input', saveVidState); el.addEventListener('change', saveVidState);
+});
+vidSrcZ.onUrl = () => { saveVidState(); showClipWarning(); };
+restoreVidState();
+
 // ─── HISTORY tab ─────────────────────────────────────────────────────────────
 let _allHistory = [];
 
@@ -2875,6 +3255,7 @@ function renderHistory() {
 
   items.forEach((entry, idx) => {
     if (!entry.image_url) return; // skip malformed entries
+    if (entry.media === 'video') { grid.appendChild(buildVideoCard(entry, { history: true })); return; }
 
     // A/B compare source: use the entry's stored input_url or first ref_url
     const refPreview = entry.input_url || entry.ref_urls?.[0] || null;
@@ -2909,6 +3290,7 @@ function renderHistory() {
               <button data-sendto="vto">👕 Try-On</button>
               <button data-sendto="deblur">🔍 Deblur</button>
               <button data-sendto="upscale">🔬 Upscale <span class="lb-sendto-hint">Topaz</span></button>
+            <button data-sendto="video-i2v">🎬 Video <span class="lb-sendto-hint">start frame</span></button>
             </div>
           </div>
           <button class="btn btn-secondary btn-sm" data-action="hc-delete" title="Delete from history">🗑</button>
@@ -3021,9 +3403,11 @@ function renderHistoryList(items) {
       <td style="padding:8px 14px;font-size:11px;color:var(--text-secondary)">${e.width && e.height ? e.width+'×'+e.height : '—'}</td>
       <td style="padding:8px 14px;font-size:11px;color:var(--text-muted);font-family:'JetBrains Mono',monospace">${e.seed || '—'}</td>
       <td style="padding:8px 14px;font-size:11px;color:var(--text-secondary)">${e.cost != null ? e.cost+'cr' : '—'}</td>
-      <td style="padding:8px 14px"><img src="${escHtml(e.image_url)}" style="height:40px;width:auto;border-radius:4px;cursor:pointer" loading="lazy"></td>`;
-    row.querySelector('img').addEventListener('click', () => openLightbox(e, items, idx));
-    row.addEventListener('click', ev => { if (ev.target.tagName !== 'IMG') openLightbox(e, items, idx); });
+      <td style="padding:8px 14px">${e.media === 'video'
+        ? `<video src="${escHtml(e.image_url)}" style="height:40px;width:auto;border-radius:4px" muted preload="metadata"></video>`
+        : `<img src="${escHtml(e.image_url)}" style="height:40px;width:auto;border-radius:4px;cursor:pointer" loading="lazy">`}</td>`;
+    row.querySelector('img')?.addEventListener('click', () => openLightbox(e, items, idx));
+    row.addEventListener('click', ev => { if (ev.target.tagName !== 'IMG' || e.media === 'video') openLightbox(e, items, idx); });
     row.addEventListener('mouseenter', () => row.style.background = 'var(--bg-hover)');
     row.addEventListener('mouseleave', () => row.style.background = '');
     body.appendChild(row);
@@ -3104,6 +3488,9 @@ document.addEventListener('keydown', e => {
     if (e.key === 'ArrowRight') { e.preventDefault(); _lbNavigate(+1); return; }
   }
 
+  // ⌘, / Ctrl+, opens Settings from anywhere
+  if ((e.ctrlKey || e.metaKey) && e.key === ',') { e.preventDefault(); document.getElementById('btn-settings')?.click(); return; }
+
   // ? opens shortcuts (but not when typing)
   if (e.key === '?' && document.activeElement?.tagName?.toLowerCase() !== 'textarea'
       && document.activeElement?.tagName?.toLowerCase() !== 'input') {
@@ -3114,7 +3501,7 @@ document.addEventListener('keydown', e => {
     const activeTab = document.querySelector('.tab-btn.active')?.dataset.tab;
     const btnMap = {
       generate: 'btn-generate', inpaint: 'btn-inpaint', erase: 'btn-erase',
-      outpaint: 'btn-outpaint', vto: 'btn-vto', deblur: 'btn-deblur',
+      outpaint: 'btn-outpaint', vto: 'btn-vto', deblur: 'btn-deblur', video: 'btn-video',
     };
     if (btnMap[activeTab]) document.getElementById(btnMap[activeTab])?.click();
   }
@@ -3149,6 +3536,17 @@ async function _routePasteFile(file) {
     else                        target = _vtoLastFocus === 'garment' ? vtoGarmentUZ : vtoPersonUZ; // both full → last-clicked
     await target._handleFile(file);
     toast(`📋 Pasted into ${target === vtoPersonUZ ? 'person' : 'garment'} slot`, 'success');
+    return;
+  }
+
+  // Video tab: pasted frames become keyframes (first empty row, else the last-clicked one)
+  if (tab === 'video') {
+    if (document.getElementById('vid-mode').value !== 'i2v') setVidMode('i2v');
+    let target = VID_KF.find(k => !k.uz.url);
+    if (!target && VID_KF.length < 10) target = addKeyframeRow();
+    if (!target) target = _kfFocus && VID_KF.includes(_kfFocus) ? _kfFocus : VID_KF[VID_KF.length - 1];
+    await target.uz._handleFile(file);
+    toast(`📋 Pasted as keyframe ${VID_KF.indexOf(target) + 1}`, 'success');
     return;
   }
 
