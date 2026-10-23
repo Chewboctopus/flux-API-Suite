@@ -563,7 +563,7 @@ function buildVideoCard(entry, { history = false } = {}) {
   const card = document.createElement('div');
   card.className = history ? 'history-card' : 'result-card';
   const shortId = entry.id?.slice(-8) || '—';
-  const meta = [shortId, entry.cost != null ? `${entry.cost}cr` : '', entry.resolution, entry.duration && entry.duration !== 'auto' ? `${entry.duration}s` : '', entry.is_draft ? 'DRAFT' : ''].filter(Boolean).join(' · ');
+  const meta = [shortId, entry.cost != null ? `${entry.cost}cr` : '', entry.topaz_credits != null ? `${entry.topaz_credits} Topaz cr` : '', entry.resolution, entry.duration && entry.duration !== 'auto' ? `${entry.duration}s` : '', entry.is_draft ? 'DRAFT' : ''].filter(Boolean).join(' · ');
   const canEnhance = Boolean(entry.is_draft && (entry.draft_cache_file || entry.draft_cache));
   const ts = new Date(entry.timestamp).toLocaleString(undefined, { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
 
@@ -581,7 +581,8 @@ function buildVideoCard(entry, { history = false } = {}) {
           <div class="lb-sendto-menu hidden rc-sendto-menu">
             <button data-sendto="video-v2v">➡ Extend <span class="lb-sendto-hint">continuation</span></button>
             <button data-sendto="video-edit">✏ Video Edit</button>
-            <button data-sendto="video-upscale">🔬 Video Upscale</button>
+            <button data-sendto="video-upscale">🔬 Video Upscale <span class="lb-sendto-hint">FLUX</span></button>
+            <button data-sendto="topaz-video">🔬 Upscale <span class="lb-sendto-hint">Topaz</span></button>
           </div>
         </div>
       </div>
@@ -1183,6 +1184,7 @@ function sendToTool(tool, imageUrl, entry) {
     'video-v2v':     () => { switchTab('video'); setVidMode('v2v');     setTimeout(() => vidSrcZ.setFromUrl(imageUrl), 120); },
     'video-edit':    () => { switchTab('video'); setVidMode('edit');    setTimeout(() => vidSrcZ.setFromUrl(imageUrl), 120); },
     'video-upscale': () => { switchTab('video'); setVidMode('upscale'); setTimeout(() => vidSrcZ.setFromUrl(imageUrl), 120); },
+    'topaz-video':   () => { switchTab('upscale'); setUpMedia('video'); setTimeout(() => upVidZ.setFromUrl(imageUrl), 120); },
   };
 
   if (actions[tool]) {
@@ -3215,6 +3217,128 @@ async function restoreVidState() {
 });
 vidSrcZ.onUrl = () => { saveVidState(); showClipWarning(); };
 restoreVidState();
+
+// ─── UPSCALE tab: Image / Video (Topaz Video API) ─────────────────────────────
+const upVidZ = new VideoZone('up-vid-upload', 'up-vid-file', 'up-vid-preview');
+// Tag the existing image-upscale controls so the Image/Video switch can hide them as a group
+document.querySelectorAll('#tab-upscale .tool-sidebar-inner > .section:not(#up-media-section):not(.up-vid)')
+  .forEach(el => el.classList.add('up-img'));
+
+const UP_FORMATS = {
+  'h265':       { encoder: 'H265',   profile: 'Main10',   container: 'mp4' },
+  'h264':       { encoder: 'H264',   profile: 'High',     container: 'mp4' },
+  'prores-hq':  { encoder: 'ProRes', profile: '422 HQ',   container: 'mov' },
+  'prores-std': { encoder: 'ProRes', profile: '422 Std',  container: 'mov' },
+  'prores-lt':  { encoder: 'ProRes', profile: '422 LT',   container: 'mov' },
+};
+const UP_DENOISE_MODELS = new Set(['nyx-3', 'nxhf-1', 'nxl-1', 'nxf-1', 'thm-2']);   // keep source resolution
+
+function upVidTarget() {
+  const m = upVidZ.meta; if (!m) return null;
+  const sel = document.getElementById('up-vid-res').value;
+  const short = Math.min(m.w, m.h);
+  let scale;
+  if (sel === 'same') scale = 1;
+  else if (sel === 'x2') scale = 2;
+  else if (sel === 'x4') scale = 4;
+  else scale = Number(sel) / short;
+  const r4 = (n) => Math.max(4, Math.round(n / 4) * 4);
+  return { w: r4(m.w * scale), h: r4(m.h * scale), scale };
+}
+
+function refreshUpVidInfo() {
+  const m = upVidZ.meta, info = document.getElementById('up-vid-info'), out = document.getElementById('up-vid-outinfo');
+  info.textContent = m ? `${m.w}×${m.h} · ${m.duration.toFixed(1)} s` : '';
+  const t = upVidTarget();
+  out.textContent = t ? `Output ${t.w}×${t.h}${t.scale <= 1 ? ' (same as source)' : ` (${t.scale.toFixed(2).replace(/\.00$/, '')}×)`}` : '';
+}
+
+function applyUpVidModel() {
+  const sel = document.getElementById('up-vid-model');
+  const model = sel.value, gen = sel.selectedOptions[0]?.dataset.gen;
+  document.getElementById('up-vid-astra').classList.toggle('vid-hidden', gen !== 'astra' || document.getElementById('up-media').value !== 'video');
+  // Denoise / deblur models don't change resolution: offer "same as source" and select it
+  const res = document.getElementById('up-vid-res');
+  if (!res.querySelector('option[value=same]')) res.insertBefore(new Option('Same as source', 'same'), res.firstChild);
+  if (UP_DENOISE_MODELS.has(model)) res.value = 'same';
+  else if (res.value === 'same') res.value = '2160';
+  refreshUpVidInfo();
+}
+
+function setUpMedia(kind) {
+  const video = kind === 'video';
+  document.getElementById('up-media').value = kind;
+  document.querySelectorAll('#tab-upscale .up-img').forEach(el => el.classList.toggle('vid-hidden', video));
+  document.querySelectorAll('#tab-upscale .up-vid').forEach(el => el.classList.toggle('vid-hidden', !video));
+  document.getElementById('btn-upscale').classList.toggle('vid-hidden', video);
+  document.getElementById('btn-upscale-video').classList.toggle('vid-hidden', !video);
+  if (video) applyUpVidModel();
+}
+document.getElementById('up-media').addEventListener('change', e => setUpMedia(e.target.value));
+document.getElementById('up-vid-model').addEventListener('change', applyUpVidModel);
+document.getElementById('up-vid-res').addEventListener('change', refreshUpVidInfo);
+upVidZ.onMeta = refreshUpVidInfo;
+document.getElementById('up-vid-creativity').addEventListener('input', e => { document.getElementById('up-vid-creativity-val').textContent = e.target.value; });
+applyUpVidModel();
+setUpMedia('image');
+
+let _upVidBusy = false;
+document.getElementById('btn-upscale-video').addEventListener('click', async () => {
+  if (_upVidBusy) { toast('A video upscale is already running — one request at a time', 'warn'); return; }
+  if (!TOPAZ_KEY) { toast('Add your Topaz API key in Settings first', 'warn'); return; }
+  if (!upVidZ.url) { toast('Upload a source clip', 'warn'); return; }
+  const m = upVidZ.meta, t = upVidTarget();
+  if (!m || !t) { toast('Still reading the clip — try again in a second', 'warn'); return; }
+  const model = document.getElementById('up-vid-model').value;
+  const sel = document.getElementById('up-vid-model').selectedOptions[0];
+  const fmt = UP_FORMATS[document.getElementById('up-vid-format').value];
+  if (t.scale < 1) { toast(`Target is smaller than the source (${m.w}×${m.h}). Pick a larger resolution.`, 'warn', 7000); return; }
+
+  const params = {};
+  if (sel?.dataset.gen === 'astra') {
+    const prompt = document.getElementById('up-vid-prompt').value.trim();
+    const creativity = Number(document.getElementById('up-vid-creativity').value);
+    if (prompt) params.prompt = prompt;
+    if (creativity > 0) params.creativity = creativity;
+  }
+
+  const btn = document.getElementById('btn-upscale-video');
+  _upVidBusy = true; btn.disabled = true; btn.textContent = '⏳ Uploading to Topaz…';
+  showStatus('upscale-status', 'upscale-status-text', 'Uploading clip to Topaz…');
+  const stopTimer = startTimer(document.getElementById('upscale-elapsed'));
+  try {
+    const started = await topazFetch('/api/topaz/video/start', {
+      video_url: upVidZ.url, model, output_width: t.w, output_height: t.h,
+      encoder: fmt.encoder, profile: fmt.profile, container: fmt.container, params,
+    });
+    const est = started.estimates?.cost;
+    toast(`✦ Topaz job started${est ? ` · estimate ${est[0]}${est[1] && est[1] !== est[0] ? '–' + est[1] : ''} Topaz credits` : ''}. Don't click again — it can take several minutes.`, 'info', 9000);
+    btn.textContent = '⏳ Topaz processing…';
+
+    const t0 = Date.now();
+    for (;;) {
+      await new Promise(r => setTimeout(r, 5000));
+      if (Date.now() - t0 > 90 * 60 * 1000) throw new Error('Timed out waiting for Topaz after 90 minutes');
+      const st = await topazGet(`/api/topaz/video/status/${started.requestId}`);
+      const pct = st.progress != null ? ` ${Math.round(st.progress)}%` : '';
+      document.getElementById('upscale-status-text').textContent = `Topaz: ${st.status}${pct}`;
+      btn.textContent = `⏳ ${st.status}${pct}`;
+      if (st.status === 'complete') break;
+      if (st.status === 'failed' || st.status === 'canceled') throw new Error(`Topaz ${st.status}${st.errorCode ? ` (${st.errorCode})` : ''}${st.message ? `: ${st.message}` : ''}`);
+    }
+    const entry = await topazFetch(`/api/topaz/video/finish/${started.requestId}`, {
+      model, container: fmt.container, input_url: upVidZ.url, estimates: started.estimates,
+      prompt: params.prompt || '',
+    });
+    renderSingleResult('upscale-results', entry);
+    toast('✓ Video upscaled — saved to Upscale results and History', 'success', 8000);
+  } catch (e) {
+    toast(e.message, 'error', 10000);
+  } finally {
+    stopTimer(); hideStatus('upscale-status');
+    _upVidBusy = false; btn.disabled = false; btn.textContent = '✦ Upscale Video';
+  }
+});
 
 // ─── HISTORY tab ─────────────────────────────────────────────────────────────
 let _allHistory = [];

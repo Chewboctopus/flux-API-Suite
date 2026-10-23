@@ -676,6 +676,107 @@
         <aside class="tool-sidebar">
           <div class="tool-sidebar-inner">
 
+            <div class="section" id="up-media-section">
+              <div class="section-title">Upscale</div>
+              <div class="field">
+                <select id="up-media">
+                  <option value="image">Image</option>
+                  <option value="video">Video (Topaz)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Topaz Video controls (shown when Upscale → Video) -->
+            <div class="section up-vid vid-hidden">
+              <div class="section-title">Source Clip <span class="field-hint">up to 500 MB</span></div>
+              <div class="upload-zone" id="up-vid-upload" style="height:150px">
+                <input type="file" id="up-vid-file" accept="video/*">
+                <div class="uz-icon">🎬</div>
+                <div class="uz-text">Drop a clip or click to browse</div>
+                <video id="up-vid-preview" style="display:none;position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none" muted loop></video>
+                <div class="uz-overlay"><span>Change Clip</span></div>
+              </div>
+              <div class="field-hint" id="up-vid-info" style="margin-top:6px"></div>
+            </div>
+
+            <div class="section up-vid vid-hidden">
+              <div class="section-title">Model</div>
+              <div class="field">
+                <select id="up-vid-model">
+                  <optgroup label="── Starlight · Generative ──">
+                    <option value="slp-2.6" data-gen="starlight" selected>Starlight Precise 2.6 — GenAI &amp; archival, realistic faces</option>
+                    <option value="slf-3" data-gen="starlight">Starlight Fast 3 — Fastest Starlight</option>
+                    <option value="slhq-1" data-gen="starlight">Starlight HQ — Max quality, modern hi-res</option>
+                  </optgroup>
+                  <optgroup label="── Astra · Creative ──">
+                    <option value="ast-2" data-gen="astra">Astra 2 — Creative detail for GenAI video</option>
+                  </optgroup>
+                  <optgroup label="── Precision ──">
+                    <option value="prob-4">Proteus — Default, general purpose</option>
+                    <option value="pnat-1">Proteus Natural — Natural enhancement</option>
+                    <option value="rhea-1">Rhea — High-fidelity 4× fine detail</option>
+                    <option value="ghq-5">Gaia HQ — High-quality CGI &amp; animation</option>
+                    <option value="gcg-5">Gaia CG — CGI refinement</option>
+                    <option value="ahq-12">Artemis HQ — Clean source, balanced denoise/sharpen</option>
+                    <option value="amq-13">Artemis MQ — Medium-quality sources</option>
+                    <option value="alq-13">Artemis LQ — Low-quality sources</option>
+                    <option value="iris-3">Iris — Face recovery for degraded footage</option>
+                    <option value="thd-3">Theia Detail — Manual clarity &amp; detail</option>
+                    <option value="thf-4">Theia Fidelity — Fidelity-first</option>
+                    <option value="thm-2">Themis 2 — Motion deblur</option>
+                  </optgroup>
+                  <optgroup label="── Denoise ──">
+                    <option value="nyx-3">Nyx — Natural texture-preserving denoise</option>
+                    <option value="nxhf-1">Nyx High Fidelity — Pipeline-ready</option>
+                    <option value="nxl-1">Nyx XL — Extreme noise</option>
+                    <option value="nxf-1">Nyx Fast — High-volume</option>
+                  </optgroup>
+                </select>
+              </div>
+            </div>
+
+            <div class="section up-vid vid-hidden">
+              <div class="section-title">Output</div>
+              <div class="field">
+                <div class="field-label">Resolution</div>
+                <select id="up-vid-res">
+                  <option value="1080">1080p</option>
+                  <option value="1440">1440p (2K)</option>
+                  <option value="2160" selected>2160p (4K)</option>
+                  <option value="x2">2× source</option>
+                  <option value="x4">4× source</option>
+                </select>
+              </div>
+              <div class="field">
+                <div class="field-label">Format</div>
+                <select id="up-vid-format">
+                  <option value="h265" selected>H.265 10-bit · mp4</option>
+                  <option value="h264">H.264 · mp4</option>
+                  <option value="prores-hq">ProRes 422 HQ · mov (for Resolve)</option>
+                  <option value="prores-std">ProRes 422 · mov</option>
+                  <option value="prores-lt">ProRes 422 LT · mov</option>
+                </select>
+              </div>
+              <div class="field-hint" id="up-vid-outinfo"></div>
+            </div>
+
+            <div class="section up-vid vid-hidden" id="up-vid-astra">
+              <div class="section-title">Astra 2 Options</div>
+              <div class="field">
+                <div class="field-label">Prompt <span class="field-hint">optional guidance</span></div>
+                <textarea id="up-vid-prompt" rows="2" placeholder="Describe the footage to steer the added detail…"></textarea>
+              </div>
+              <div class="field">
+                <div class="field-label">Creativity <span id="up-vid-creativity-val" class="field-hint">0</span></div>
+                <input type="range" id="up-vid-creativity" min="0" max="1" value="0" step="0.05">
+              </div>
+            </div>
+
+            <div class="section up-vid vid-hidden">
+              <div class="vid-note">Topaz bills in its own credits, per frame and resolution. The estimate is shown when the job starts. Clips are uploaded to Topaz and the result is saved to your outputs folder. Works best on 5–60 s clips.</div>
+            </div>
+
+
             <div class="section">
               <div class="section-title">Source Image</div>
               <div class="upload-zone" id="upscale-upload" style="height:200px">
@@ -823,6 +924,7 @@
           </div>
           <div class="tool-sidebar-footer">
             <button class="btn btn-primary btn-full" id="btn-upscale">✦ Upscale</button>
+            <button class="btn btn-primary btn-full vid-hidden" id="btn-upscale-video">✦ Upscale Video</button>
           </div>
         </aside>
 

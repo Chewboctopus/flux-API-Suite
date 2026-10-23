@@ -876,6 +876,98 @@ app.get('/api/topaz/download/:id', async (req, res) => {
   } catch (e) { handleError(res, e); }
 });
 
+// ─── Topaz — Video Upscale / Enhance (express flow) ──────────────────────────
+// POST /video/express returns a single upload URL; PUT the clip there and Topaz
+// starts processing — no accept / complete-upload calls needed. Poll /status,
+// then download from the signed URL (valid ~7 days) as soon as it completes.
+const TOPAZ_VIDEO_BASE = 'https://api.topazlabs.com/video';
+const TOPAZ_VIDEO_PASSTHROUGH = ['prompt', 'creativity', 'sharp', 'sharpness', 'noise', 'details', 'blur', 'compression', 'halo', 'preblur', 'recoverOriginalDetailValue', 'videoType'];
+const TOPAZ_SOURCE_CONTAINERS = ['3gp','avi','dv','flv','m1v','m2t','m2ts','m2v','m4v','mkv','mov','mp4','mpeg','mpg','mts','mxf','ser','ts','vob','webm','wmv'];
+
+app.post('/api/topaz/video/start', async (req, res) => {
+  const topazKey = getTopazKey(req);
+  if (!topazKey) return res.status(401).json({ error: 'Missing Topaz API key' });
+  const {
+    video_url, model = 'prob-4', output_width, output_height,
+    encoder = 'H265', profile, container = 'mp4', params = {},
+  } = req.body;
+  if (!video_url) return res.status(400).json({ error: 'No video provided' });
+  if (!output_width || !output_height) return res.status(400).json({ error: 'Output resolution is required' });
+
+  try {
+    const m = video_url.match(/\/(uploads|outputs)\/([^/?#]+)$/);
+    if (!m) return res.status(400).json({ error: 'Video must be an uploaded or generated clip' });
+    const file = join(m[1] === 'uploads' ? UPLOADS_DIR : OUTPUTS_DIR, m[2]);
+    if (!existsSync(file)) return res.status(400).json({ error: 'Source clip not found on disk' });
+    const buf = readFileSync(file);
+    if (buf.length > 500 * 1024 * 1024) return res.status(400).json({ error: 'Clips over 500 MB are not supported by the single-upload path' });
+    const ext = extname(file).slice(1).toLowerCase();
+    const srcContainer = TOPAZ_SOURCE_CONTAINERS.includes(ext) ? ext : 'mp4';
+
+    const filter = { model };
+    for (const k of TOPAZ_VIDEO_PASSTHROUGH) {
+      const v = params[k];
+      if (v !== undefined && v !== null && v !== '') filter[k] = v;
+    }
+    const output = {
+      resolution: { width: Number(output_width), height: Number(output_height) },
+      videoEncoder: encoder, container,
+    };
+    if (profile) output.videoProfile = profile;
+
+    const create = await fetch(`${TOPAZ_VIDEO_BASE}/express`, {
+      method: 'POST',
+      headers: { 'X-API-Key': topazKey, 'Content-Type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ source: { container: srcContainer }, filters: [filter], output }),
+    });
+    const created = await create.json().catch(() => ({}));
+    if (!create.ok) return res.status(create.status).json({ error: created.message || created.error || created.detail || `Topaz error ${create.status}`, details: created });
+    const uploadUrl = created.uploadUrls?.[0];
+    if (!uploadUrl) return res.status(502).json({ error: 'Topaz did not return an upload URL', details: created });
+
+    const mime = { mov: 'video/quicktime', webm: 'video/webm', mkv: 'video/x-matroska' }[srcContainer] || 'video/mp4';
+    const put = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': mime }, body: buf });
+    if (!put.ok) return res.status(502).json({ error: `Upload to Topaz failed (${put.status})` });
+
+    res.json({ requestId: created.requestId, estimates: created.estimates || null, model, container, srcFile: m[2] });
+  } catch (e) { handleError(res, e); }
+});
+
+app.get('/api/topaz/video/status/:id', async (req, res) => {
+  const topazKey = getTopazKey(req);
+  if (!topazKey) return res.status(401).json({ error: 'Missing Topaz API key' });
+  try {
+    const r = await fetch(`${TOPAZ_VIDEO_BASE}/${encodeURIComponent(req.params.id)}/status`, { headers: { 'X-API-Key': topazKey, accept: 'application/json' } });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) return res.status(r.status).json({ error: data.message || `Topaz status error ${r.status}`, details: data });
+    res.json(data);
+  } catch (e) { handleError(res, e); }
+});
+
+// Save the finished clip locally and log it in history
+app.post('/api/topaz/video/finish/:id', async (req, res) => {
+  const topazKey = getTopazKey(req);
+  if (!topazKey) return res.status(401).json({ error: 'Missing Topaz API key' });
+  const { model, container = 'mp4', input_url, prompt, estimates } = req.body;
+  try {
+    const r = await fetch(`${TOPAZ_VIDEO_BASE}/${encodeURIComponent(req.params.id)}/status`, { headers: { 'X-API-Key': topazKey, accept: 'application/json' } });
+    const data = await r.json().catch(() => ({}));
+    const url = data.download?.url;
+    if (!r.ok || !url) return res.status(409).json({ error: data.message || 'Result is not ready yet', details: data });
+    const genId = makeId('upscale');
+    const localFile = await saveOutput(url, genId, container);
+    const entry = {
+      id: genId, tool: 'upscale', media: 'video', model: `topaz/${model}`, prompt: prompt || '',
+      cost: null, topaz_credits: Array.isArray(estimates?.cost) ? estimates.cost[0] : (data.estimates?.cost?.[0] ?? null),
+      output_format: container, input_url: input_url || null,
+      local_file: localFile, image_url: finalImageUrl(localFile, url),
+      timestamp: new Date().toISOString(),
+    };
+    appendHistory(entry);
+    res.json(entry);
+  } catch (e) { handleError(res, e); }
+});
+
 // ─── App Config ───────────────────────────────────────────────────────────────
 app.get('/api/config', (_req, res) => {
   try { res.json(JSON.parse(readFileSync(CONFIG_FILE, 'utf8'))); }
