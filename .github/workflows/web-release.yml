@@ -1,0 +1,35 @@
+name: Web Release (standalone zip)
+
+# Adds a standalone "FLUX Studio Web" zip to each release, next to the desktop installers.
+# Separate from release.yml on purpose: if this job ever fails, the desktop release is unaffected.
+on:
+  release:
+    types: [published]          # fires when you click "Publish" on the (draft) release
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to attach the web zip to (e.g. v2.6.0). Must contain the web/ folder.'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  web-zip:
+    name: Build & attach web zip
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build standalone web zip
+        run: node web/build.mjs
+      - name: Attach zip to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$TAG" dist-web/FLUX-Studio-Web-v*.zip --clobber

@@ -1,0 +1,423 @@
+diff --git a/public/app.js b/public/app.js
+index a2fa2a3..7b7af5d 100644
+--- a/public/app.js
++++ b/public/app.js
+@@ -3,6 +3,12 @@
+    Vanilla ES module SPA: all tab controllers + mask painter + uploader
+    ═══════════════════════════════════════════════════════════════════════════ */
+ 
++import { webBootstrap, persistCredentials, isWebMode, webReveal, webChangeOutputsFolder } from './web-setup.js';
++
++// Local web version only: restore saved API keys and run the first-run folder step.
++// (No-op in the desktop app.)  Top-level await: nothing below runs until this resolves.
++await webBootstrap();
++
+ // ─── State ───────────────────────────────────────────────────────────────────
+ let API_KEY = localStorage.getItem('flux_api_key') || '';
+ let TOPAZ_KEY = localStorage.getItem('topaz_api_key') || '';
+@@ -1375,6 +1381,7 @@ document.getElementById('btn-connect').addEventListener('click', () => {
+   
+   if (topazKey) localStorage.setItem('topaz_api_key', topazKey);
+   else localStorage.removeItem('topaz_api_key');
++  persistCredentials();
+   
+   document.getElementById('screen-apikey').classList.remove('active');
+   document.getElementById('screen-app').classList.add('active');
+@@ -1487,6 +1494,7 @@ if (window.electronAPI?.isElectron) document.body.classList.add('is-electron');
+     if (!val) { toast('API key cannot be empty', 'warn'); return; }
+     API_KEY = val;
+     localStorage.setItem('flux_api_key', val);
++    persistCredentials();
+     toast('API key saved ✓', 'success');
+     closeSettings();
+     loadCredits();
+@@ -3884,6 +3892,7 @@ document.getElementById('settings-apikey-save').addEventListener('click', () =>
+   API_KEY = key;
+   if (key) localStorage.setItem('flux_api_key', key);
+   else localStorage.removeItem('flux_api_key');
++  persistCredentials();
+   loadCredits();
+   toast('✓ BFL API key updated', 'success');
+   updateTabAvailability();
+@@ -3904,6 +3913,7 @@ document.getElementById('settings-topazkey-save')?.addEventListener('click', ()
+   TOPAZ_KEY = key;
+   if (key) localStorage.setItem('topaz_api_key', key);
+   else localStorage.removeItem('topaz_api_key');
++  persistCredentials();
+   toast('✓ Topaz API key updated', 'success');
+   updateTabAvailability();
+ });
+@@ -3920,6 +3930,7 @@ document.getElementById('settings-topazkey-reveal')?.addEventListener('click', (
+ document.querySelectorAll('[data-reveal]').forEach(btn => {
+   btn.addEventListener('click', () => {
+     const which = btn.dataset.reveal;
++    if (isWebMode()) { webReveal(which, toast); return; }   // local web version
+     const folder = _settingsPaths[which === 'outputs' ? 'outputs'
+                                  : which === 'uploads' ? 'uploads'
+                                  : 'data'];
+@@ -3931,6 +3942,7 @@ document.querySelectorAll('[data-reveal]').forEach(btn => {
+ 
+ // Change data folder
+ document.getElementById('settings-change-folder').addEventListener('click', async () => {
++  if (isWebMode()) { webChangeOutputsFolder(toast); return; }   // local web version
+   if (!window.fluxApp?.pickFolder) {
+     toast('Folder picker is only available in the desktop app', 'info'); return;
+   }
+diff --git a/public/index.css b/public/index.css
+index f903827..ceb6b92 100644
+--- a/public/index.css
++++ b/public/index.css
+@@ -57,7 +57,8 @@ body {
+ .screen.active { display: flex; flex-direction: column; }
+ 
+ /* ─── API Key Screen ─────────────────────────────────────────────────────── */
+-#screen-apikey {
++#screen-apikey,
++#screen-setup {
+   align-items: center;
+   justify-content: center;
+   background: radial-gradient(ellipse at 50% 30%, rgba(232,160,32,0.06) 0%, transparent 60%), var(--bg-deep);
+@@ -1306,3 +1307,9 @@ body:not(.is-electron) #settings-folder-section { display: none; }
+ .history-card .rc-sendto-menu,
+ .history-card .hc-sendto-menu { left: 0; right: auto; min-width: 190px; }
+ .result-card video, .history-card video { border-radius: var(--r-md) var(--r-md) 0 0; }
++
++/* ─── First-run setup (local web version) ────────────────────────────────── */
++.setup-dir-row { display: flex; gap: 8px; }
++.setup-dir-row input { flex: 1; min-width: 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
++.setup-error { color: #f87171; font-size: 12px; line-height: 1.45; }
++.setup-error:empty { display: none; }
+diff --git a/public/index.html b/public/index.html
+index 1fd6696..cf86f4b 100644
+--- a/public/index.html
++++ b/public/index.html
+@@ -31,7 +31,30 @@
+       <button class="btn btn-secondary btn-full" id="btn-cancel-key" style="display:none">Cancel</button>
+       <button class="btn btn-primary btn-full" id="btn-connect">Connect →</button>
+     </div>
+-    <p class="apikey-note">Keys stored in browser only. Never sent to any server except their respective APIs.</p>
++    <p class="apikey-note" id="apikey-storage-note">Keys stored in browser only. Never sent to any server except their respective APIs.</p>
++  </div>
++</div>
++
++<!-- ═══ FIRST-RUN SETUP (local web version only) ══════════════════════════ -->
++<div id="screen-setup" class="screen">
++  <div class="apikey-card">
++    <div class="apikey-logo">
++      <svg width="32" height="32" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="8" fill="currentColor" fill-opacity="0.12"/><path d="M8 16C8 11.6 11.6 8 16 8s8 3.6 8 8-3.6 8-8 8-8-3.6-8-8Z" stroke="currentColor" stroke-width="1.5"/><circle cx="16" cy="16" r="3" fill="currentColor"/></svg>
++      <div class="apikey-logo-text">FLUX <span>Studio</span></div>
++    </div>
++    <p class="apikey-tagline">Welcome! Where should FLUX Studio save the images and videos you create?</p>
++    <div class="apikey-form">
++      <label for="input-outputs-dir">Save location</label>
++      <div class="setup-dir-row">
++        <input type="text" id="input-outputs-dir" autocomplete="off" spellcheck="false">
++        <button class="btn btn-secondary" id="btn-pick-folder" type="button">Browse…</button>
++      </div>
++      <p class="apikey-note" style="text-align:left">FLUX Studio will create the folder if it doesn't exist. Any folder you can write to works.</p>
++      <p class="setup-error" id="setup-error" role="alert"></p>
++    </div>
++    <div class="apikey-actions">
++      <button class="btn btn-primary btn-full" id="btn-setup-continue">Continue →</button>
++    </div>
+   </div>
+ </div>
+ 
+@@ -1290,9 +1313,20 @@
+         <button class="btn btn-secondary btn-sm" id="settings-change-folder" style="width:100%;justify-content:center">
+           📁 Change Data Folder…
+         </button>
+-        <p style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.5">
++        <p id="settings-folder-help" style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.5">
+           Moving the data folder requires restarting the app. Your existing files will not be moved automatically — copy them manually.
+         </p>
++        <div class="settings-notice hidden" id="web-folder-notice" style="margin-top:10px">
++          <strong>New images folder:</strong> <code id="web-folder-chosen" style="word-break:break-all"></code>
++          <div id="web-folder-count" style="margin-top:6px"></div>
++          <div id="web-folder-status" style="margin-top:6px"></div>
++          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
++            <button class="btn btn-primary btn-sm" id="web-folder-copy">Use it &amp; copy existing files</button>
++            <button class="btn btn-secondary btn-sm" id="web-folder-nocopy">Use it, don't copy</button>
++            <button class="btn btn-secondary btn-sm" id="web-folder-cancel">Cancel</button>
++          </div>
++        </div>
++
+       </div>
+ 
+       <div class="settings-section" style="margin-bottom:0">
+diff --git a/server.js b/server.js
+index 7c9d15d..d017344 100644
+--- a/server.js
++++ b/server.js
+@@ -1,19 +1,23 @@
+ import express from 'express';
+ import multer from 'multer';
+-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync } from 'fs';
++import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, chmodSync, statSync, constants as fsConstants } from 'fs';
+ import { fileURLToPath } from 'url';
+-import { dirname, join, extname } from 'path';
++import { dirname, join, extname, resolve, isAbsolute } from 'path';
++import { homedir } from 'os';
++import { execFile, spawn } from 'child_process';
++import { copyFile, readdir } from 'fs/promises';
+ import { randomUUID } from 'crypto';
+ 
+ const __dirname = dirname(fileURLToPath(import.meta.url));
+ const app = express();
+ const PORT = process.env.PORT || 3000;
++const IS_WEB = process.env.FLUX_WEB === '1';   // local web version (start-web launchers)
+ const BFL_BASE = 'https://api.bfl.ai/v1';
+ // DATA_DIR: in Electron builds, set via process.env.DATA_DIR to a writable
+ // location (~/Documents/FLUX Studio/data). Falls back to ./data for npm start.
+ const DATA_DIR  = process.env.DATA_DIR || join(__dirname, 'data');
+ const UPLOADS_DIR = join(DATA_DIR, 'uploads');
+-const OUTPUTS_DIR = join(DATA_DIR, 'outputs');
++let OUTPUTS_DIR = join(DATA_DIR, 'outputs');   // `let`: the web version lets the user choose it on first run
+ const HISTORY_FILE = join(DATA_DIR, 'history.json');
+ const CSV_FILE     = join(DATA_DIR, 'generations.csv');
+ 
+@@ -26,6 +30,27 @@ if (!existsSync(CSV_FILE))     writeFileSync(CSV_FILE, 'id,timestamp,tool,model,
+ const CONFIG_FILE  = join(DATA_DIR, 'config.json');
+ if (!existsSync(CONFIG_FILE)) writeFileSync(CONFIG_FILE, JSON.stringify({ port: 4242 }, null, 2));
+ 
++// ─── Local web version (FLUX_WEB=1) ───────────────────────────────────────────
++// Set only by the start-web launchers / `npm run web`. Adds a first-run choice of
++// outputs folder and keeps API keys on this computer. The desktop app and plain
++// `npm start` behave exactly as before.
++const CREDS_FILE = join(DATA_DIR, 'credentials.json');
++const DEFAULT_WEB_OUTPUTS = join(homedir(), 'Downloads', 'FLUX Studio');
++const readConfig = () => { try { return JSON.parse(readFileSync(CONFIG_FILE, 'utf8')); } catch { return {}; } };
++let outputsProblem = null;   // set when a previously chosen folder can no longer be used
++if (IS_WEB) {
++  const saved = readConfig().outputsDir;
++  if (saved) {
++    try {
++      mkdirSync(saved, { recursive: true });
++      OUTPUTS_DIR = saved;
++    } catch (e) {
++      outputsProblem = `Your saved location couldn't be used. ${friendlyFsError(e, saved)}`;
++      console.warn(`\n  ⚠ ${outputsProblem}\n`);
++    }
++  }
++}
++
+ 
+ // ─── Multer ───────────────────────────────────────────────────────────────────
+ const storage = multer.diskStorage({
+@@ -37,7 +62,8 @@ const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } });
+ // ─── Middleware ───────────────────────────────────────────────────────────────
+ app.use(express.json({ limit: '50mb' }));
+ app.use(express.static(join(__dirname, 'public')));
+-app.use('/outputs', express.static(OUTPUTS_DIR));
++let outputsStatic = express.static(OUTPUTS_DIR);
++app.use('/outputs', (req, res, next) => outputsStatic(req, res, next));   // follows OUTPUTS_DIR if it changes
+ app.use('/uploads', express.static(UPLOADS_DIR));
+ 
+ // ─── Helpers ──────────────────────────────────────────────────────────────────
+@@ -984,6 +1010,206 @@ app.post('/api/config', (req, res) => {
+   } catch (e) { handleError(res, e); }
+ });
+ 
++// ─── Local web version: first-run setup + locally stored credentials ──────────
++// All /api/web/* routes (except the harmless status probe) require:
++//  • Host to be localhost / 127.0.0.1 on our port  → blocks DNS-rebinding attacks
++//  • Origin (if sent) to be ourselves              → blocks other sites calling us
++//  • a custom x-flux-web header                    → cross-site requests can't set it
++function webGuard(req, res, next) {
++  const host = String(req.headers.host || '').toLowerCase();
++  const origin = req.headers.origin;
++  const okHost = host === `localhost:${PORT}` || host === `127.0.0.1:${PORT}`;
++  const okOrigin = !origin || origin === `http://${host}`;
++  if (!IS_WEB) return res.status(404).json({ error: 'Not available' });
++  if (!okHost || !okOrigin || req.headers['x-flux-web'] !== '1') {
++    return res.status(403).json({ error: 'Forbidden' });
++  }
++  next();
++}
++
++function readCreds() {
++  try {
++    const c = JSON.parse(readFileSync(CREDS_FILE, 'utf8'));
++    return { bfl: String(c.bfl || ''), topaz: String(c.topaz || '') };
++  } catch { return { bfl: '', topaz: '' }; }
++}
++function writeCreds(c) {
++  writeFileSync(CREDS_FILE, JSON.stringify(c, null, 2), { mode: 0o600 });
++  try { chmodSync(CREDS_FILE, 0o600); } catch { /* not supported on Windows */ }
++}
++
++function resolveUserDir(input) {
++  let p = String(input || '').trim().replace(/^["']+|["']+$/g, '');
++  if (!p) throw new Error('Please enter a folder path.');
++  if (p === '~' || p.startsWith('~/') || p.startsWith('~\\')) p = join(homedir(), p.slice(1));
++  if (!isAbsolute(p)) throw new Error(`Please enter the full path to a folder, for example ${DEFAULT_WEB_OUTPUTS}`);
++  return resolve(p);
++}
++
++function friendlyFsError(e, dir) {
++  if (e.code === 'EACCES' || e.code === 'EPERM') return `FLUX Studio doesn't have permission to write to "${dir}". Choose a folder you own, such as one inside Downloads or Documents.`;
++  if (e.code === 'EROFS') return `"${dir}" is on a read-only disk. Choose a different folder.`;
++  if (e.code === 'EEXIST' || e.code === 'ENOTDIR') return `"${dir}" is a file (or sits inside one), not a folder. Choose a different location.`;
++  return e.message;
++}
++
++function nearestExisting(p) {
++  while (!existsSync(p) && dirname(p) !== p) p = dirname(p);
++  return p;
++}
++
++function pickFolder(startDir) {
++  const prompt = 'Choose where FLUX Studio saves your images and videos';
++  const run = (cmd, args) => new Promise((ok, fail) => {
++    execFile(cmd, args, { timeout: 10 * 60 * 1000, windowsHide: true }, (err, stdout) => {
++      if (err && err.code === 'ENOENT') return fail(Object.assign(new Error('no picker'), { code: 'NO_PICKER' }));
++      if (err && typeof err.code === 'number') return ok('');   // dialog cancelled / closed
++      if (err) return fail(err);
++      ok(String(stdout).trim());
++    });
++  });
++  const tidy = (p) => (p.length > 1 ? p.replace(/(?<!:)[\\/]+$/, '') : p);
++
++  if (process.platform === 'darwin') {
++    const q = (s) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
++    return run('osascript', [
++      '-e', 'try',
++      '-e', `set f to choose folder with prompt "${q(prompt)}" default location (POSIX file "${q(startDir)}")`,
++      '-e', 'return POSIX path of f',
++      '-e', 'on error number -128',
++      '-e', 'return ""',
++      '-e', 'end try',
++    ]).then(tidy);
++  }
++  if (process.platform === 'win32') {
++    const ps = `Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = '${prompt}'; $d.ShowNewFolderButton = $true; $d.SelectedPath = '${startDir.replace(/'/g, "''")}'; if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $d.SelectedPath }`;
++    return run('powershell.exe', ['-NoProfile', '-STA', '-Command', ps]).then(tidy);
++  }
++  return run('zenity', ['--file-selection', '--directory', '--title', prompt, '--filename', startDir + '/'])
++    .catch((e) => {
++      if (e.code !== 'NO_PICKER') throw e;
++      return run('kdialog', ['--getexistingdirectory', startDir, '--title', prompt]);
++    })
++    .then(tidy);
++}
++
++// Status probe: safe to call anywhere; tells the front end whether this is the web version.
++app.get('/api/web/status', (req, res, next) => (IS_WEB ? next() : res.json({ web: false })), webGuard, (_req, res) => {
++  const cfg = readConfig();
++  const creds = readCreds();
++  res.json({
++    web: true,
++    needsOutputs: !cfg.outputsDir || !!outputsProblem,
++    outputsProblem,
++    outputsDir: OUTPUTS_DIR,
++    defaultOutputsDir: DEFAULT_WEB_OUTPUTS,
++    hasBfl: !!creds.bfl,
++    hasTopaz: !!creds.topaz,
++  });
++});
++
++async function listOutputFiles(dir) {
++  try {
++    const entries = await readdir(dir, { withFileTypes: true });
++    return entries.filter((e) => e.isFile() && !e.name.startsWith('.')).map((e) => e.name);
++  } catch { return []; }
++}
++
++// How much is in the current outputs folder (used to offer "copy existing files").
++app.get('/api/web/outputs-stats', webGuard, async (_req, res) => {
++  const files = await listOutputFiles(OUTPUTS_DIR);
++  let bytes = 0;
++  for (const f of files) { try { bytes += statSync(join(OUTPUTS_DIR, f)).size; } catch { /* vanished */ } }
++  res.json({ dir: OUTPUTS_DIR, files: files.length, bytes });
++});
++
++// Set (or change) the outputs folder. With copyExisting, files already in the current
++// folder are copied across first (never overwriting, never deleting the originals) so
++// History keeps working; if any copy fails the folder is NOT changed.
++app.post('/api/web/outputs', webGuard, async (req, res) => {
++  let dir = '';
++  try {
++    dir = resolveUserDir(req.body?.dir);
++    mkdirSync(dir, { recursive: true });
++    if (!statSync(dir).isDirectory()) throw Object.assign(new Error('not a folder'), { code: 'ENOTDIR' });
++    const probe = join(dir, `.flux-write-test-${randomUUID()}`);
++    writeFileSync(probe, 'ok');
++    unlinkSync(probe);
++
++    let copied = 0, skipped = 0;
++    if (req.body?.copyExisting && resolve(dir) !== resolve(OUTPUTS_DIR)) {
++      const failed = [];
++      for (const name of await listOutputFiles(OUTPUTS_DIR)) {
++        try {
++          await copyFile(join(OUTPUTS_DIR, name), join(dir, name), fsConstants.COPYFILE_EXCL);
++          copied++;
++        } catch (e) {
++          if (e.code === 'EEXIST') skipped++; else failed.push(name);
++        }
++      }
++      if (failed.length) {
++        return res.status(500).json({ error: `Couldn't copy ${failed.length} file(s) (for example ${failed[0]}), so the folder was not changed. Nothing was lost: your files are still in the old folder.` });
++      }
++    }
++
++    OUTPUTS_DIR = dir;
++    outputsStatic = express.static(dir);
++    outputsProblem = null;
++    writeFileSync(CONFIG_FILE, JSON.stringify({ ...readConfig(), outputsDir: dir }, null, 2));
++    res.json({ ok: true, outputsDir: dir, copied, skipped });
++  } catch (e) {
++    res.status(400).json({ error: friendlyFsError(e, dir || String(req.body?.dir || '')) });
++  }
++});
++
++// Open one of FLUX Studio's own folders in Finder / Explorer. The client only names
++// WHICH folder; the path always comes from the server, never from the request.
++app.post('/api/web/reveal', webGuard, (req, res) => {
++  const dir = { outputs: OUTPUTS_DIR, uploads: UPLOADS_DIR, data: DATA_DIR }[req.body?.which];
++  if (!dir) return res.status(400).json({ error: 'Unknown folder.' });
++  try { mkdirSync(dir, { recursive: true }); } catch { /* may already exist */ }
++  const [cmd, args] =
++    process.platform === 'darwin' ? ['open', [dir]] :
++    process.platform === 'win32'  ? ['explorer.exe', [dir]] :
++                                    ['xdg-open', [dir]];
++  const child = spawn(cmd, args, { stdio: 'ignore', detached: true });
++  child.once('error', (e) => {
++    if (!res.headersSent) res.status(501).json({ error: `Couldn't open the folder on this computer (${e.code || e.message}). It is at: ${dir}` });
++  });
++  child.once('spawn', () => {
++    child.unref();
++    if (!res.headersSent) res.json({ ok: true });
++  });
++});
++
++app.post('/api/web/pick-folder', webGuard, async (req, res) => {
++  let start;
++  try { start = resolveUserDir(req.body?.start); } catch { start = DEFAULT_WEB_OUTPUTS; }
++  start = nearestExisting(start);
++  try {
++    const picked = await pickFolder(start);
++    res.json(picked ? { path: picked } : { cancelled: true });
++  } catch (e) {
++    const why = e.code === 'NO_PICKER'
++      ? "This computer doesn't have a folder picker available."
++      : `Couldn't open the folder picker (${e.message}).`;
++    res.status(501).json({ error: `${why} Type or paste the folder path instead.` });
++  }
++});
++
++app.get('/api/web/credentials', webGuard, (_req, res) => {
++  res.setHeader('Cache-Control', 'no-store');
++  res.json(readCreds());
++});
++
++app.post('/api/web/credentials', webGuard, (req, res) => {
++  try {
++    const clean = (v) => String(v ?? '').trim().slice(0, 500);
++    writeCreds({ bfl: clean(req.body?.bfl), topaz: clean(req.body?.topaz) });
++    res.json({ ok: true });
++  } catch (e) { res.status(500).json({ error: `Couldn't save credentials: ${e.message}` }); }
++});
++
+ // ─── Ping — identity probe so a new instance can detect us ────────────────────
+ app.get('/api/ping', (_req, res) => {
+   res.json({ app: 'flux-studio', version: '2.0.0' });
