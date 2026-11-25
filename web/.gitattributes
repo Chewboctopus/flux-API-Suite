@@ -1,0 +1,5 @@
+# The patch must reach the build byte-for-byte; the launchers need platform line endings.
+patches/*.patch  -text
+launchers/start.bat      text eol=crlf
+launchers/start.command  text eol=lf
+overlay/*.mjs    text eol=lf
