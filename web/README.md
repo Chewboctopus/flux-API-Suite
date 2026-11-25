@@ -54,6 +54,9 @@ the hunk that didn't apply. To fix it:
 
 - `start.bat` (Windows) and the Windows folder picker have not been run on a real Windows machine.
 - `web-release.yml` has not been run on GitHub yet; try *Run workflow* once after merging.
-- A zip downloaded from the internet is quarantined by macOS: users must right-click → Open the
-  launcher once (the bundled README says so).
+- **macOS quarantine:** a zip downloaded in a browser is quarantined, and on current macOS the *Open Anyway*
+  step needs an **administrator password**, so non-admin users cannot double-click the launcher the first time.
+  Workaround (documented in the bundled README): run it from Terminal once (`bash`, then drag the launcher in).
+  The launcher then clears the quarantine tag from its own folder. Proper fixes: a Terminal one-liner that
+  downloads with `curl` (no quarantine), distribution via a shared drive, or a signed + notarized app wrapper.
 - API keys are stored as plain text (owner-only permissions), not in the OS keychain.

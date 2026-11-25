@@ -9,6 +9,12 @@ cd "$(dirname "$0")" || exit 1
 ROOT="$(pwd)"
 APP="$ROOT/app"            # everything except this launcher lives in ./app
 RUNTIME="$APP/.runtime"
+# macOS tags anything downloaded in a browser as "quarantined". For a file like this, double-clicking
+# then needs an ADMINISTRATOR password (System Settings > Privacy & Security > Open Anyway).
+# This script was started by the user on purpose (e.g. from Terminal), and these are its own files,
+# so remove that tag from this folder: after the first run, double-clicking works for everyone.
+if [ "$(uname -s)" = "Darwin" ]; then xattr -dr com.apple.quarantine "$ROOT" 2>/dev/null || true; fi
+
 MIN_NODE=18
 NODE_LINE="${FLUX_NODE_LINE:-v24.x}"   # which Node release line to download if needed
 

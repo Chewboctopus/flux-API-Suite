@@ -1,10 +1,23 @@
 HOW TO START
 ------------
-  Mac:      double-click   "Start FLUX Studio.command"
-  Windows:  double-click   "Start FLUX Studio.bat"
+MAC  (first time only - takes 30 seconds, NO administrator password needed)
+  1. Open the Terminal app: press Command+Space, type  Terminal  and press Return.
+  2. Type the word  bash  followed by ONE SPACE. Do not press Return yet.
+  3. Drag the file  "Start FLUX Studio.command"  from this folder into the Terminal
+     window, then press Return.
+  FLUX Studio opens in your browser. From now on you can simply double-click
+  "Start FLUX Studio.command" like any other app.
 
-  Mac, first time only: if it says the file can't be opened, right-click it,
-  choose Open, then click Open again.
+  Why not just double-click the first time? macOS marks files downloaded from the
+  internet, and for a file like this it asks for an ADMINISTRATOR password to open it.
+  Starting it from Terminal avoids that. (If you ARE an administrator you can also
+  double-click it and approve it in System Settings > Privacy & Security > Open Anyway.)
+  The launcher then removes macOS's download mark from this folder only, which is why
+  later double-clicks work.
+
+WINDOWS
+  Double-click  "Start FLUX Studio.bat".  If Windows says it "protected your PC", click
+  More info, then Run anyway.
 
 Your browser opens FLUX Studio. The first time, you'll choose where to save your
 images (default: a "FLUX Studio" folder inside Downloads) and paste your Black
