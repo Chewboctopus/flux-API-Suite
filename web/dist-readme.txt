@@ -1,5 +1,8 @@
 HOW TO START
 ------------
+EASIEST: double-click the file  START HERE.html  (in this folder). It opens in your browser
+and shows exactly what to do, with the right line to copy. The same steps are below.
+
 MAC  (first time only - takes 30 seconds, NO administrator password needed)
   1. Open the Terminal app: press Command+Space, type  Terminal  and press Return.
   2. Type the word  bash  followed by ONE SPACE. Do not press Return yet.

@@ -8,7 +8,7 @@
  *   1. copies server.js, public/, package.json and package-lock.json to a temp folder,
  *   2. applies the web layer (web/patches/web-layer.patch) to that COPY,
  *   3. adds the web-only files (web/overlay/*),
- *   4. wraps it all in a clean folder: launchers + README at the top, everything else in ./app,
+ *   4. wraps it all in a clean folder: launchers + START HERE.html + README at the top, everything else in ./app,
  *   5. zips it.
  *
  * Output (default ./dist-web, git-ignored):
@@ -64,6 +64,7 @@ try {
   chmodSync(join(top, 'Start FLUX Studio.command'), 0o755);
   const stamp = new Date().toISOString().slice(0, 10);
   writeFileSync(join(top, 'README.txt'), `FLUX STUDIO WEB  -  version ${version}  (built ${stamp})\n\n` + readFileSync(join(here, 'dist-readme.txt'), 'utf8'));
+  writeFileSync(join(top, 'START HERE.html'), readFileSync(join(here, 'start-here.html'), 'utf8').replaceAll('{{VERSION}}', 'v' + version));
 
   // 5. move into the output folder
   mkdirSync(outRoot, { recursive: true });
