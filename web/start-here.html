@@ -45,6 +45,15 @@
   details.faq summary { cursor:pointer; font-weight:600; }
   details.faq p { color:var(--muted); margin:8px 0 0; }
   code.i { font:14px ui-monospace, SFMono-Regular, Menlo, monospace; background:var(--code); padding:1px 6px; border-radius:5px; border:1px solid var(--line); }
+  .status { display:flex; align-items:center; gap:14px; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px 18px; margin:0 0 18px; }
+  .status .dot { flex:0 0 12px; width:12px; height:12px; border-radius:50%; background:var(--muted); animation:pulse 1.6s ease-in-out infinite; }
+  .status .txt { display:flex; flex-direction:column; min-width:0; }
+  .status .txt span { color:var(--muted); font-size:14px; }
+  .status .open { margin-left:auto; flex:0 0 auto; background:var(--accent); color:var(--accent-ink); font-weight:750; padding:11px 20px; border-radius:10px; text-decoration:none; white-space:nowrap; }
+  .status .open:hover { filter:brightness(1.08); }
+  .status[data-state="running"] { border-color:var(--ok); }
+  .status[data-state="running"] .dot { background:var(--ok); animation:none; }
+  @keyframes pulse { 0%,100% { opacity:.35; } 50% { opacity:1; } }
   footer { margin-top:40px; color:var(--muted); font-size:13px; }
   .hide { display:none !important; }
 </style>
@@ -54,6 +63,12 @@
   <div class="pill">No administrator password needed</div>
   <h1>Welcome to <span>FLUX Studio</span> Web</h1>
   <p class="lead">Two minutes, one time. After that, it opens like any other app.</p>
+
+  <div class="status" id="status" data-state="idle">
+    <div class="dot"></div>
+    <div class="txt"><b id="stTitle">FLUX Studio isn't running yet</b><span id="stSub">Follow the steps below. This page notices when it starts. (If it doesn't, FLUX Studio still opens by itself in your browser.)</span></div>
+    <a class="open hide" id="openBtn" href="#">Open FLUX Studio</a>
+  </div>
 
   <noscript><div class="after"><b>Tip:</b> turn on JavaScript to see the exact line to copy. Otherwise: open Terminal, type <code class="i">bash</code> and a space, drag the file <b>Start FLUX Studio.command</b> into the Terminal window, then press Return.</div></noscript>
 
@@ -177,6 +192,45 @@
     } catch (e) {}
     if (ok) done(); else { selectCmd(); btn.textContent = "Press \u2318C"; }
   }
+  // ---- Live status: is FLUX Studio running on this computer? ----
+  // A page cannot start a program, but it can notice one. FLUX Studio serves favicon.svg, so a plain image
+  // request to localhost tells us it is up (no cross-site permissions, nothing is sent or stored).
+  var statusEl = document.getElementById("status"), openBtn = document.getElementById("openBtn");
+  var stTitle = document.getElementById("stTitle"), stSub = document.getElementById("stSub");
+  var baseTitle = document.title, lastPort = -1;
+  function probe(port) {
+    return new Promise(function (resolve) {
+      var img = new Image(), t = setTimeout(function () { img.onload = img.onerror = null; resolve(false); }, 1500);
+      img.onload = function () { clearTimeout(t); resolve(true); };
+      img.onerror = function () { clearTimeout(t); resolve(false); };
+      img.src = "http://localhost:" + port + "/favicon.svg?t=" + Date.now();
+    });
+  }
+  function scan() {
+    var jobs = []; for (var i = 0; i < 10; i++) jobs.push(probe(3000 + i));
+    return Promise.all(jobs).then(function (r) { for (var i = 0; i < r.length; i++) if (r[i]) return 3000 + i; return 0; });
+  }
+  function render(port) {
+    if (port === lastPort) return;
+    var wasIdle = lastPort <= 0; lastPort = port;
+    if (port) {
+      statusEl.setAttribute("data-state", "running");
+      stTitle.textContent = "FLUX Studio is running";
+      stSub.textContent = "It is ready in your browser. You can leave this page open or close it.";
+      openBtn.href = "http://localhost:" + port + "/"; openBtn.classList.remove("hide");
+      document.title = "\u2713 FLUX Studio is running";
+      if (wasIdle) { mac.open = false; win.open = false; }
+    } else {
+      statusEl.setAttribute("data-state", "idle");
+      stTitle.textContent = "FLUX Studio isn't running yet";
+      stSub.textContent = "Follow the steps below. This page notices when it starts. (If it doesn't, FLUX Studio still opens by itself in your browser.)";
+      openBtn.classList.add("hide"); document.title = baseTitle;
+    }
+  }
+  function tick() { if (!document.hidden) scan().then(render); }
+  if (location.protocol === "file:") { tick(); setInterval(tick, window.FLUX_POLL_MS || 3000); }
+  else { statusEl.classList.add("hide"); }
+
   btn.addEventListener("click", function () {
     if (!command) return;
     if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(command).then(done, fallback);
